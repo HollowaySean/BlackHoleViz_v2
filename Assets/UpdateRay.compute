@@ -1,6 +1,9 @@
 // Each #kernel tells which function to compile; you can have many kernels
 #pragma kernel CSMain
 
+// Constants
+static const float PI = 3.14159265f;
+
 // Output parameters
 RWTexture2D<float4> Position;
 RWTexture2D<float4> Direction;
@@ -12,6 +15,7 @@ TextureCube<float4> _SkyboxTexture;
 float timeStep;
 float escapeDistance;
 float horizonRadius;
+float diskMax;
 
 // Samplers
 SamplerState sampler_Position;
@@ -136,6 +140,23 @@ bool HorizonCheck(float3 x, float3 u)
     //}
 }
 
+// Check if path will cross accretion disk
+bool DiskCheck(float3 x, float3 xLast)
+{
+    // Check for hemisphere change
+    float newTh = (x.y % PI) - (PI / 2.0);
+    float oldTh = (xLast.y % PI) - (PI / 2.0);
+    if (newTh * oldTh > 0.0) { return false; }
+
+    // Check if within accretion disk bounds
+    float r_isco = 3.0 * horizonRadius;
+    float r_ave = (x.x + xLast.x) / 2.0;
+    if (r_ave < r_isco || r_ave > diskMax) { return false; }
+
+    // If passed, return true
+    return true;
+}
+
 [numthreads(8, 8, 1)]
 void CSMain (uint3 id : SV_DispatchThreadID)
 {
@@ -145,6 +166,7 @@ void CSMain (uint3 id : SV_DispatchThreadID)
     // Propagate ray
     float3 x =  Position[id.xy].xyz;
     float3 u = Direction[id.xy].xyz;
+    float3 xLast = x;
     float dt = CalculateStepSize(x, u);
     RK4Step(dt, x, u);
 
@@ -152,11 +174,18 @@ void CSMain (uint3 id : SV_DispatchThreadID)
     Position[id.xy]  = float4(x.xyz, 0.0);
     Direction[id.xy] = float4(u.xyz, 0.0);
 
-    // Evaluate skybox texture
-    //float3 outRay = ToCartesianScalar(x.xyz);
-    //outRay.z *= -1.0;
-    //Color[id.xy] = _SkyboxTexture.SampleLevel(sampler_SkyboxTexture, outRay, 0);
+    // Read test color for incomplete trace
     Color[id.xy] = float4(1.0, 0.0, 0.0, 1.0);
+
+    // Check for disk crossing
+    if (DiskCheck(x, xLast))
+    {
+        // Return white color
+        Color[id.xy] = float4(1.0, 1.0, 0.9, 1.0);
+
+        // Set complete flag
+        isComplete[id.xy] = 1;
+    }
 
     // Check for horizon condition
     if (HorizonCheck(x, u))

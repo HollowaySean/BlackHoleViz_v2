@@ -414,6 +414,10 @@ MonoBehaviour:
   timeStep: 0.001
   escapeDistance: 10000
   horizonRadius: 0.5
+  updateInterval: 5
+  scaleFactor: 2
+  saveToFile: 1
+  filenamePrefix: test
 --- !u!1 &966637174
 GameObject:
   m_ObjectHideFlags: 0

@@ -14,6 +14,7 @@ public class RayTraceCamera : MonoBehaviour
         timeStep = 0.001f,
         escapeDistance = 10000f,
         horizonRadius = 0.5f,
+        diskMax = 4f,
         updateInterval = 1f;
     public int
         scaleFactor = 4;
@@ -82,6 +83,7 @@ public class RayTraceCamera : MonoBehaviour
         rayUpdateShader.SetFloat("timeStep", timeStep);
         rayUpdateShader.SetFloat("escapeDistance", escapeDistance);
         rayUpdateShader.SetFloat("horizonRadius", horizonRadius);
+        rayUpdateShader.SetFloat("diskMax", diskMax);
     }
 
     private void OnRenderImage(RenderTexture source, RenderTexture destination) {
