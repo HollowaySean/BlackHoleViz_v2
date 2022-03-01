@@ -1,0 +1,114 @@
+// Each #kernel tells which function to compile; you can have many kernels
+#pragma kernel CSMain
+
+// Output parameters
+RWTexture2D<float4> Position;
+RWTexture2D<float4> Direction;
+RWTexture2D<float4> Color;
+RWTexture2D<int> isComplete;
+
+// Input parameters
+float4x4 _CameraToWorld;
+float4x4 _CameraInverseProjection;
+float3 _CameraPositionCartesian;
+float3 _CameraPositionSpherical;
+float horizonRadius;
+
+// Cartesian to Spherical coordinate conversion
+float3 ToSphericalScalar(float3 cart)
+{
+    float r = length(cart);
+    float rxz = length(cart.xz);
+    float theta = atan2(rxz, cart.y);
+    float phi = atan2(cart.z, cart.x);
+
+    return float3(r, theta, phi);
+}
+
+// Cartesian to Spherical vector conversion (inputs in cartesian)
+float3 ToSphericalVector(float3 origin, float3 dir)
+{
+    float r = length(origin);
+    float rxz = length(origin.xz);
+
+    float3x3 L = {
+        origin.x / r,                        // dr/dx
+        origin.y / r,                        // dr/dy
+        origin.z / r,                        // dr/dz
+        origin.x * origin.y / (r * r * rxz), // dtheta/dx
+        -rxz / (r * r),                      // dtheta/dy
+        origin.z* origin.y / (r * r * rxz),  // dtheta/dz
+        -origin.z / rxz,                     // dphi/dx
+        0.0,                                 // dphi/dy
+        origin.x / rxz                       // dphi/dz
+    };
+
+    return mul(L, dir);
+}
+
+// Spherical to Cartesian coordinate conversion
+float3 ToCartesianScalar(float3 sph)
+{
+    float x = sph.x * cos(sph.z) * sin(sph.y);
+    float y = sph.x * cos(sph.y);
+    float z = sph.x * sin(sph.z) * sin(sph.y);
+
+    return float3(x, y, z);
+}
+
+// Spherical to Cartesian vector conversion (inputs in spherical)
+float3 ToCartesianVector(float3 origin, float3 dir)
+{
+    float3x3 L = {
+        sin(origin.y) * cos(origin.z),              // dx/dr
+        origin.x * cos(origin.y) * cos(origin.z),   // dx/dtheta
+        -origin.x * sin(origin.y) * sin(origin.z),  // dx/dphi
+        cos(origin.y),                              // dz/dr
+        -origin.x * sin(origin.y),                  // dz/dtheta
+        0.0,                                        // dz/dphi
+        sin(origin.y) * sin(origin.z),              // dy/dr
+        origin.x* cos(origin.y)* sin(origin.z),     // dy/dtheta
+        origin.x* sin(origin.y)* cos(origin.z)      // dy/dphi
+    };
+
+    return mul(L, dir);
+}
+
+
+[numthreads(8, 8, 1)]
+void CSMain (uint3 id : SV_DispatchThreadID)
+{
+    // Initialize pixel color
+    float3 pixelColor;
+
+    // Get the dimensions of the RenderTexture
+    uint width, height;
+    Position.GetDimensions(width, height);
+
+    // Transform pixel to [-1,1] range
+    float2 uv = float2((id.xy + float2(0.5f, 0.5f)) / float2(width, height) * 2.0f - 1.0f);
+
+    // Invert the perspective projection of the view-space position
+    float3 direction = mul(_CameraInverseProjection, float4(uv, 0.0f, 1.0f)).xyz;
+
+    // Transform the direction from camera to world space and normalize
+    direction = mul(_CameraToWorld, float4(direction, 0.0f)).xyz;
+    direction = normalize(direction);
+
+    // Transform from cartesian space to spherical space
+    float3 originSph    = _CameraPositionSpherical;
+    float3 directionSph = ToSphericalVector(_CameraPositionCartesian, direction);
+    
+    // Lower indices of velocity
+    directionSph.x *= (1.0 - (horizonRadius / originSph.x));
+    directionSph.y *= originSph.x * originSph.x;
+    // NOTE: By all means the following value should be squared. 
+    // For the life of me, I can not yet figure out why
+    directionSph.z *= originSph.x * sin(originSph.y);
+
+    // Pass direction to result
+    Position[id.xy] = float4(originSph, 0.0);
+    Direction[id.xy] = float4(directionSph, 0.0);
+    Color[id.xy] = float4(0.0, 0.0, 0.0, 1.0);
+    isComplete[id.xy] = 0;
+}

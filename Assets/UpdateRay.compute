@@ -1,0 +1,184 @@
+// Each #kernel tells which function to compile; you can have many kernels
+#pragma kernel CSMain
+
+// Output parameters
+RWTexture2D<float4> Position;
+RWTexture2D<float4> Direction;
+RWTexture2D<float4> Color;
+RWTexture2D<int> isComplete;
+
+// Input parameters
+TextureCube<float4> _SkyboxTexture;
+float timeStep;
+float escapeDistance;
+float horizonRadius;
+
+// Samplers
+SamplerState sampler_Position;
+SamplerState sampler_Direction;
+SamplerState sampler_isComplete;
+SamplerState sampler_SkyboxTexture;
+
+// Calculate change in k along geodesic affine parameter
+void CalculateGeodesicDerivative(float3 x, float3 u, out float3 dx, out float3 du)
+{
+    // Pre-calculate factors
+    float r = x.x;
+    float rs = horizonRadius;
+    float th = x.y;
+    float sth = sin(th);
+    float A = 1.0 - (rs / r);
+    float a = sqrt(A);
+
+    // Calculate proper time derivative
+    float u0 = sqrt((A * u.x * u.x) + (u.y * u.y / (r * r)) + (u.z * u.z / (r * r * sth * sth))) / a;
+
+    // Calculate spatial derivatives
+    dx.x = A * u.x / u0;
+    dx.y = u.y / (r * r * u0);
+    dx.z = u.z / (r * r * sth * sth * u0);
+    du.x = 
+        (-u0 * rs / (2.0 * r * r)) +
+        (-u.x * u.x * rs / (2.0 * u0 * r * r)) +
+        (u.y * u.y / (r * r * r * u0)) + 
+        (u.z * u.z / (r * r * r * sth * sth * u0));
+    du.y = (u.z * u.z / (r * r * sth * sth * tan(th) * u0));
+    du.z = 0.0;
+
+    return;
+}
+
+// Runge-Kutta 4th Order integration
+void RK4Step(float tStep, inout float3 x, inout float3 u)
+{
+
+    // Calculate k-factors
+    float3 dx1, du1, dx2, du2, dx3, du3, dx4, du4;
+    CalculateGeodesicDerivative(x, u, dx1, du1);
+    CalculateGeodesicDerivative(x + dx1 * (tStep / 2.0), u + du1 * (tStep / 2.0), dx2, du2);
+    CalculateGeodesicDerivative(x + dx2 * (tStep / 2.0), u + du2 * (tStep / 2.0), dx3, du3);
+    CalculateGeodesicDerivative(x + dx3 * tStep,         u + du3 * tStep,         dx4, du4);
+
+    // Calculate full update
+    x += (tStep / 6.0) * (dx1 + 2.0 * dx2 + 2.0 * dx3 + dx4);
+    u += (tStep / 6.0) * (du1 + 2.0 * du2 + 2.0 * du3 + du4);
+
+    return;
+}
+
+// Spherical to Cartesian coordinate conversion
+float3 ToCartesianScalar(float3 sph)
+{
+    float3 cart;
+    cart.x = sph.x * cos(sph.z) * sin(sph.y);
+    cart.y = sph.x * cos(sph.y);
+    cart.z = sph.x * sin(sph.z) * sin(sph.y);
+
+    return cart;
+}
+
+// Generate affine parameter step size
+float CalculateStepSize(float3 x, float3 u)
+{
+    float rs = horizonRadius;
+
+    if (abs(x.x) < 2.0 * rs)
+    {
+        // Near horizon regime
+        return timeStep;
+    }
+    else
+    {
+        if (u.x * x.x > 0.0)
+        {
+            // Far from horizon, receding
+            return max(timeStep * x.x * x.x, timeStep);
+        }
+        else
+        {
+            // Far from horizon, approaching
+            return max(timeStep * (abs(x.x) - (2.0 * rs)), timeStep);
+        }
+    }
+}
+
+// Check if geodesic inevitably crosses horizon
+bool HorizonCheck(float3 x, float3 u)
+{
+
+    return abs(x.x) < 1.5 * horizonRadius;
+
+    // TO DO: Use constants of motion to check if geodesic can be thrown out at infinity
+
+//    // Pre-calculate factors
+//    float r = x.x;
+//    float rs = horizonRadius;
+//    float th = x.y;
+//    float sth = sin(th);
+//    float A = 1.0 - (rs / r);
+//    float a = sqrt(A);
+//
+//    // Calculate motion constants
+//    float Esq = ((A * u.x * u.x) + (u.y * u.y / (r * r)) + (u.z * u.z / (r * r * sth * sth)));
+//    float Lsq = (r * r * r * r) * (u.y * u.y + sth * sth * u.z * u.z);
+//    float C = Lsq / Esq;
+
+    //// Check horizon conditions
+    //if (C > 27.0 * rs * rs / 4.0)
+    //{
+    //    return r < 1.5 * horizonRadius;
+    //}
+    //else
+    //{
+    //    // FIX THIS
+    //    //return u.x > 0.0;
+    //    return false;
+    //}
+}
+
+[numthreads(8, 8, 1)]
+void CSMain (uint3 id : SV_DispatchThreadID)
+{
+    // Break if already failed bounds check
+    if (isComplete[id.xy] == 1) { return; }
+
+    // Propagate ray
+    float3 x =  Position[id.xy].xyz;
+    float3 u = Direction[id.xy].xyz;
+    float dt = CalculateStepSize(x, u);
+    RK4Step(dt, x, u);
+
+    // Write back position and direction
+    Position[id.xy]  = float4(x.xyz, 0.0);
+    Direction[id.xy] = float4(u.xyz, 0.0);
+
+    // Evaluate skybox texture
+    //float3 outRay = ToCartesianScalar(x.xyz);
+    //outRay.z *= -1.0;
+    //Color[id.xy] = _SkyboxTexture.SampleLevel(sampler_SkyboxTexture, outRay, 0);
+    Color[id.xy] = float4(1.0, 0.0, 0.0, 1.0);
+
+    // Check for horizon condition
+    if (HorizonCheck(x, u))
+    {
+        // Return black color
+        Color[id.xy] = float4(0.0, 0.0, 0.0, 1.0);
+
+        // Set complete flag
+        isComplete[id.xy] = 1;
+    }
+
+    // Check for escape condition
+    if (abs(x.x) > escapeDistance * horizonRadius)
+    {
+        // Evaluate skybox texture
+        float3 outRay = ToCartesianScalar(x.xyz).xyz;
+        outRay.z *= -1.0;
+        Color[id.xy] = _SkyboxTexture.SampleLevel(sampler_SkyboxTexture, outRay, 0);
+
+        // Set complete flag
+        isComplete[id.xy] = 1;
+    }
+
+
+}
