@@ -1,0 +1,10 @@
+Improve Accretion Disk:
+- Set up reference camera with identical disk sampling and alpha blending
+- Correct periodicity at phi = +/-pi
+- Improve look of texture
+- Implement blackbody look
+- Implement doppler shift
+- Implement beaming
+
+Cinematic Effect:
+- Implement bloom
