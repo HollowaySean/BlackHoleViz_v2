@@ -3,6 +3,7 @@
 
 // Constants
 static const float PI = 3.14159265f;
+static float4 diskColor = float4(1.5 * float3(1.0, 1.0, 0.85), 1.0);
 
 // Output parameters
 RWTexture2D<float4> Position;
@@ -12,6 +13,7 @@ RWTexture2D<int> isComplete;
 
 // Input parameters
 TextureCube<float4> _SkyboxTexture;
+Texture2D<float3> _NoiseTexture;
 float timeStep;
 float escapeDistance;
 float horizonRadius;
@@ -22,6 +24,7 @@ SamplerState sampler_Position;
 SamplerState sampler_Direction;
 SamplerState sampler_isComplete;
 SamplerState sampler_SkyboxTexture;
+SamplerState sampler_NoiseTexture;
 
 // Calculate change in k along geodesic affine parameter
 void CalculateGeodesicDerivative(float3 x, float3 u, out float3 dx, out float3 du)
@@ -157,6 +160,34 @@ bool DiskCheck(float3 x, float3 xLast)
     return true;
 }
 
+// Get color of accretion disk
+float4 GetDiskColor(float3 x, float3 xLast)
+{
+    // Calculate noise texture UV coordinates
+    float2 uv;
+    float rEval = (x.x + xLast.x) / 2.0;
+    float phEval = (x.z + xLast.z) / 2.0;
+    uv.x = (abs(rEval) - 3.0 * horizonRadius) / (diskMax - 3.0 * horizonRadius);
+    uv.y = phEval / (2.0 * PI);
+
+    // Sample noise texture
+    float4 texColor = _NoiseTexture.SampleLevel(sampler_NoiseTexture, uv, 0).xyzx;
+
+    // Reduce intensity over distance
+    texColor *= max((1.0 - uv.x), 0.0);
+
+    // Return adjusted color
+    return texColor * diskColor;
+}
+
+// Blend transparency and background colors
+float4 Blend(float4 foreColor, float4 backColor)
+{
+    // Blend using previous color's alpha
+    float4 outColor = foreColor + backColor * (1.0 - foreColor.w);
+    return outColor;
+}
+
 [numthreads(8, 8, 1)]
 void CSMain (uint3 id : SV_DispatchThreadID)
 {
@@ -174,24 +205,21 @@ void CSMain (uint3 id : SV_DispatchThreadID)
     Position[id.xy]  = float4(x.xyz, 0.0);
     Direction[id.xy] = float4(u.xyz, 0.0);
 
-    // Read test color for incomplete trace
-    Color[id.xy] = float4(1.0, 0.0, 0.0, 1.0);
-
     // Check for disk crossing
     if (DiskCheck(x, xLast))
     {
-        // Return white color
-        Color[id.xy] = float4(1.0, 1.0, 0.9, 1.0);
+        // Save color from accretion disk noise function
+        Color[id.xy] = Blend(Color[id.xy], GetDiskColor(x, xLast));
 
         // Set complete flag
-        isComplete[id.xy] = 1;
+        //isComplete[id.xy] = 1;
     }
 
     // Check for horizon condition
     if (HorizonCheck(x, u))
     {
-        // Return black color
-        Color[id.xy] = float4(0.0, 0.0, 0.0, 1.0);
+        // Blend black with previous color
+        Color[id.xy] = Blend(Color[id.xy], float4(0.0, 0.0, 0.0, 1.0));
 
         // Set complete flag
         isComplete[id.xy] = 1;
@@ -203,7 +231,10 @@ void CSMain (uint3 id : SV_DispatchThreadID)
         // Evaluate skybox texture
         float3 outRay = ToCartesianScalar(x.xyz).xyz;
         outRay.z *= -1.0;
-        Color[id.xy] = _SkyboxTexture.SampleLevel(sampler_SkyboxTexture, outRay, 0);
+        float4 skyboxColor = _SkyboxTexture.SampleLevel(sampler_SkyboxTexture, outRay, 0);
+
+        // Blend with previous color value
+        Color[id.xy] = Blend(Color[id.xy], skyboxColor);
 
         // Set complete flag
         isComplete[id.xy] = 1;

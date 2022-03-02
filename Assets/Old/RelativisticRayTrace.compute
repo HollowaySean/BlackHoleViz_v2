@@ -1,0 +1,268 @@
+// Each #kernel tells which function to compile; you can have many kernels
+#pragma kernel CSMain
+
+RWTexture2D<float4> Result;
+TextureCube<float4> _SkyboxTexture;
+
+float4x4 _CameraToWorld;
+float4x4 _CameraInverseProjection;
+float3   _CameraPosition;
+float3   _CameraRotation;
+
+SamplerState sampler_SkyboxTexture;
+static const float PI = 3.14159265f;
+static const float INF = 3.402823466e+38F;
+
+// Parameters
+float M;
+float alpha;
+float minStep;
+float escapeDist;
+int   maxSteps;
+bool  checkEscape;
+bool  checkHorizon;
+bool  RK4;
+bool  dynamicStep;
+
+// Observer 4-position and 4-velocity
+float4 u_obs = float4(1.0, 0.0, 0.0, 0.0);
+
+// Cartesian to Spherical coordinate conversion
+float3 ToSpherical(float3 cart)
+{
+    float r = length(cart);
+    float theta = acos(cart.z / r);
+    float phi = atan2(cart.y, cart.x);
+
+    return float3(r, theta, phi);
+}
+
+// Spherical to Cartesian coordinate conversion
+float3 ToCartesian(float3 sph)
+{
+    float x = sph.x * cos(sph.z) * sin(sph.y);
+    float y = sph.x * sin(sph.z) * sin(sph.y);
+    float z = sph.x * cos(sph.y);
+
+    return float3(x, y, z);
+}
+
+// Schwarzchild metric tensor
+float4x4 Metric(float4 pos)
+{
+    return float4x4(
+        1.0 - (2.0 * M / abs(pos.y)), 0.0, 0.0, 0.0,
+        0.0, -1.0 / (1.0 - (2.0 * M / abs(pos.y))), 0.0, 0.0,
+        0.0, 0.0, -pos.y * pos.y, 0.0,
+        0.0, 0.0, 0.0, -pos.y * pos.y * sin(pos.z) * sin(pos.z)
+    );
+}
+
+// Index lowering function
+float4 Lower(float4 pos, float4 vec) { return mul(Metric(pos), vec); }
+
+// Reference tetrad coordinates
+float4 TetradT(float4 pos) { return float4(1.0 / sqrt(1.0 - (2.0 * M / abs(pos.y))), 0.0, 0.0, 0.0); }
+float4 TetradR(float4 pos) { return float4(0.0, sqrt(1.0 - (2.0 * M / abs(pos.y))), 0.0, 0.0); }
+float4 TetradTh(float4 pos) { return float4(0.0, 0.0, 1.0 / abs(pos.y), 0.0); }
+float4 TetradPh(float4 pos) { return float4(0.0, 0.0, 0.0, 1.0 / (abs(pos.y) * sin(pos.z))); }
+
+// Lorentz boost tensor
+float4x4 LorentzBoost(float4 pos)
+{
+    float4 T = TetradT(pos);
+    float gamma = dot(Lower(pos, T), u_obs);
+    float4x4 boost = { { 0.0f, 0.0f, 0.0f, 0.0f }, { 0.0f , 0.0f, 0.0f, 0.0f }, { 0.0f , 0.0f, 0.0f, 0.0f }, { 0.0f , 0.0f, 0.0f, 0.0f } };
+    float4x4 delta = { { 1.0f , 0.0f, 0.0f, 0.0f }, { 0.0f , 1.0f, 0.0f, 0.0f }, { 0.0f , 0.0f, 1.0f, 0.0f }, { 0.0f , 0.0f, 0.0f, 1.0f } };
+
+    for (int row = 0; row < 4; row++) {
+        for (int col = 0; col < 4; col++) {
+            float boostVal = 0.f;
+            boostVal += delta[row][col];
+            boostVal -= (1.0 / (1.0 + gamma)) * (T[row] + u_obs[row]) * (T[col] + u_obs[col]);
+            boostVal += 2.0 * u_obs[row] * T[col];
+            boost[row][col] = boostVal;
+        }
+    }
+    return boost;
+}
+
+// Boosted reference spacelike vectors
+float4 RefA(float4 pos) { return mul(LorentzBoost(pos), TetradTh(pos)); }
+float4 RefB(float4 pos) { return mul(LorentzBoost(pos), TetradPh(pos)); }
+float4 RefC(float4 pos) { return mul(LorentzBoost(pos), TetradR(pos)); }
+
+
+// Combined setup function for camera normal 4-vector
+float4 GenerateCameraNormal(float4 pos, float3 eulerAngles, int2 dims, int2 coords)
+{
+    float phi   = radians(eulerAngles.z);
+    float theta = radians(eulerAngles.x);
+    float psi   = radians(eulerAngles.y);
+
+    float cx = float(coords.x);
+    float cy = float(coords.y);
+    float dx = float(dims.x);
+    float dy = float(dims.y);
+
+    // Camera vector rotation process
+    float4 A = RefA(pos);
+    float4 B = RefB(pos);
+    float4 C = RefC(pos);
+    float4 Ap = cos(phi) * A + sin(phi) * B;
+    float4 Bp = -sin(phi) * A + cos(phi) * B;
+    float4 Z = cos(theta) * C + sin(theta) * Ap;
+    float4 App = -sin(theta) * C + cos(theta) * Ap;
+    float4 X = cos(psi) * App + sin(psi) * Bp;
+    float4 Y = -sin(psi) * App + cos(psi) * Bp;
+
+    // Calculate intermediate vector W
+    float4 W = { 0.0f , 0.0f, 0.0f, 0.0f };
+    W += (cx - ((dx + 1.0) / 2.0)) * X;
+    W += (cy - ((dy + 1.0) / 2.0)) * Y;
+    W *= 2.0 * tan(alpha / 2.0) / dx;
+    W += Z;
+
+    // Calculate normal vector
+    float4 N = { 0.0f , 0.0f, 0.0f, 0.0f };
+    N += W;
+    N /= -1.0 * dot(Lower(pos, W), W);
+    N *= 2.0;
+    N -= Z;
+
+    return N;
+}
+
+// Calculate change in k along geodesic affine parameter
+double4 CalculateGeodesicDerivative(double4 pos, double4 k)
+{
+    // Pre-calculate factors
+    double r = abs(pos.y);
+    double th = pos.z;
+    double A = (1.0 - (2.0 * M / r));
+    double Ap = 2.0 * M / (r * r);
+
+    // Calculate derivative
+    double4 deriv;
+    deriv[0] = (-Ap / A) * k[0] * k[1];
+    deriv[1] = -0.5 * A * Ap * k[0] * k[0] + 0.5 * (Ap / A) * k[1] * k[1] + A * r * (k[2] * k[2] + sin(th) * sin(th) * k[3] * k[3]);
+    deriv[2] = (-2.0 / r) * k[1] * k[3] + sin(th) * cos(th) * k[3] * k[3];
+    deriv[3] = (-2.0 / r) * k[1] * k[3] - 2.0 * (cos(th) / sin(th)) * k[2] * k[3];
+    return deriv;
+}
+
+// Runge-Kutta 4th Order integration
+double4 RK4Step(double4 pos, double pStep, inout double4 k)
+{
+    // Calculate offset positions using affine parameter step
+    double4 p2 = pos + k * 0.5 * pStep;
+    double4 p4 = pos + k * pStep;
+
+    // Calculate k-factors
+    double4 k1 = CalculateGeodesicDerivative(pos, k);
+    double4 k2 = CalculateGeodesicDerivative(p2, k + k1 * 0.5 * pStep);
+    double4 k3 = CalculateGeodesicDerivative(p2, k + k2 * 0.5 * pStep);
+    double4 k4 = CalculateGeodesicDerivative(p4, k + k3 * pStep);
+
+    // Calculate full update
+    k += (pStep / 6.0) * (k1 + 2.0 * k2 + 2.0 * k3 + k4);
+    return pos + k * pStep;
+}
+
+// Check for horizon condition using constants of motion
+bool HorizonCheck(double4 pos, double4 k)
+{
+    // Calculate constants of motion
+    double A = (1.0 - (2.0 * M / abs(pos[1])));
+    double E = A * k[0];
+    double Lsq = pos[1] * pos[1] * pos[1] * pos[1] * (k[2] * k[2] + sin(pos[2]) * sin(pos[2]) * k[3] * k[3]);
+
+    // Return test result
+    bool res = Lsq / (E * E) > 27.0 * M * M;
+    return !(res && (abs(pos[1]) > 3.0 * M)) || (!(res) && k[1] < 0.0);
+}
+
+// Generate affine parameter step size
+double CalculateStepSize(double4 pos, double4 k)
+{
+    if (abs(pos[1]) < 4.0 * M)
+    {
+        // Near horizon regime
+        return minStep;
+    }
+    else
+    {
+        if (k[1] > 0.0)
+        {
+            // Far from horizon, receding
+            return max(minStep * pos[1] * pos[1], minStep);
+        }
+        else
+        {
+            // Far from horizon, approaching
+            return max(minStep * (abs(pos[1]) - (4.0 * M)), minStep);
+        }
+    }
+}
+
+// Main shader loop
+[numthreads(8, 8, 1)]
+void CSMain(uint3 id : SV_DispatchThreadID)
+{
+    // Get dimension of output texture
+    int2 dims;
+    Result.GetDimensions(dims.x, dims.y);
+
+    // Generate camera vectors
+    float4 x_obs = float4(0.0f, _CameraPosition);
+    float4 N = GenerateCameraNormal(x_obs, _CameraRotation, dims, id.xy);
+
+
+    // Generate motion coordinates
+    double4 k = u_obs - N;
+    double4 x = x_obs;
+
+    // Set up outputs
+    float3 pixelColor = { 1.0f, 0.0f, 0.0f };
+
+    // Propagation loop 
+    // While not timed out, not crossed horizon, not intersected with disk, and not reached infinity:
+    for (int steps = 0; steps < maxSteps; steps++)
+    {
+        // Generate step size
+        double pStepSize = dynamicStep ? CalculateStepSize(x, k) : minStep;
+
+        // Propagate along geodesic
+        if (RK4)
+        {
+            x = RK4Step(x, pStepSize, k);
+        }
+        else
+        {
+            k += pStepSize * CalculateGeodesicDerivative(x, k);
+            x += pStepSize * k;
+        }
+
+        // Check for horizon condition
+         if (checkHorizon && HorizonCheck(x, k))
+         {
+             // Return black (a la the hole)
+             pixelColor = float3(0.f, 0.f, 0.f);
+             break;
+         }
+
+        // Check for escape condition
+        if (checkEscape && (abs(x[1] / M)) > escapeDist)
+        {
+            // Use angles to determine background texture point
+            float3 outRay = ToCartesian(x.yzw).xyz;
+            pixelColor = _SkyboxTexture.SampleLevel(sampler_SkyboxTexture, outRay, 0).rgb;
+            break;
+        }
+    }
+
+    // Output result to a specific pixel in the image
+    Result[id.xy] = float4(pixelColor.xyz, 1.0);
+    //Result[id.xy] = float4(ToCartesian(x.yzw).xzy, 1.0);
+    //Result[id.xy] = float4(ToCartesian(k.yzw).zyx, 1.0);
+}

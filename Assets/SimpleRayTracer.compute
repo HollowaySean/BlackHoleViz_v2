@@ -1,0 +1,190 @@
+// Each #kernel tells which function to compile; you can have many kernels
+#pragma kernel CSMain
+
+// Constants
+static const float PI = 3.14159265f;
+static const float INF = 3.402823466e+38F;
+
+// Output parameters
+RWTexture2D<float4> Result;
+
+// Input parameters
+TextureCube<float4> _SkyboxTexture;
+Texture2D<float3> _NoiseTexture;
+float4x4 _CameraToWorld;
+float4x4 _CameraInverseProjection;
+
+// Input Parameters
+float horizonRadius;
+float diskMax;
+int sampleRate;
+
+// Samplers
+SamplerState sampler_SkyboxTexture;
+SamplerState sampler_NoiseTexture;
+
+// Ray data type
+struct Ray
+{
+    float3 origin;
+    float3 direction;
+};
+
+// Ray constructor
+Ray CreateRay(float3 origin, float3 direction)
+{
+    Ray ray;
+    ray.origin = origin;
+    ray.direction = direction;
+    return ray;
+}
+
+// Create ray using projection matrices
+Ray CreateCameraRay(float2 uv)
+{
+    // Transform the camera origin to world space
+    float3 origin = mul(_CameraToWorld, float4(0.0f, 0.0f, 0.0f, 1.0f)).xyz;
+
+    // Invert the perspective projection of the view-space position
+    float3 direction = mul(_CameraInverseProjection, float4(uv, 0.0f, 1.0f)).xyz;
+    // Transform the direction from camera to world space and normalize
+    direction = mul(_CameraToWorld, float4(direction, 0.0f)).xyz;
+    direction = normalize(direction);
+
+    return CreateRay(origin, direction);
+}
+
+// Ray hit data type
+struct RayHit
+{
+    float3 position;
+    float distance;
+    float3 normal;
+    float3 color;
+};
+
+// Ray hit creation method
+RayHit CreateRayHit()
+{
+    RayHit hit;
+    hit.position = float3(0.0, 0.0, 0.0);
+    hit.distance = INF;
+    hit.normal = float3(0.0, 0.0, 0.0);
+    hit.color = float3(0.0, 0.0, 0.0);
+    return hit;
+}
+
+// Sphere intersection check
+void IntersectSphere(Ray ray, inout RayHit bestHit, float4 sphere)
+{
+    // Calculate distance along the ray where the sphere is intersected
+    float3 d = ray.origin - sphere.xyz;
+    float p1 = -dot(ray.direction, d);
+    float p2sqr = p1 * p1 - dot(d, d) + sphere.w * sphere.w;
+    if (p2sqr < 0)
+        return;
+    float p2 = sqrt(p2sqr);
+    float t = p1 - p2 > 0 ? p1 - p2 : p1 + p2;
+    if (t > 0 && t < bestHit.distance)
+    {
+        bestHit.distance = t;
+        bestHit.position = ray.origin + t * ray.direction;
+        bestHit.normal = normalize(bestHit.position - sphere.xyz);
+        bestHit.color = float3(0.0, 0.0, 0.0);
+    }
+}
+
+// Aligned disk intersection check
+void IntersectAlignedDisk(Ray ray, inout RayHit bestHit, float r1, float r2)
+{
+    // Perform ground plane check
+    float t = -ray.origin.y / ray.direction.y;
+    float x = ray.origin.x + ray.direction.x * t;
+    float z = ray.origin.z + ray.direction.z * t;
+
+    // Check if hit is within disc radius
+    float p = x * x + z * z;
+    if (t > 0 && t < bestHit.distance && p > r1 * r1 && p < r2 * r2)
+    {
+        // Record hit properties
+        bestHit.distance = t;
+        bestHit.position = float3(x, 0.0, z);
+        bestHit.normal = float3(0.0, 1.0, 0.0);
+
+        // Sample noise texture
+        float2 uv;
+        uv.x = (sqrt(p) - r1) / (r2 - r1);
+        uv.y = atan2(z, x) / (2.0 * PI);
+        bestHit.color = _NoiseTexture.SampleLevel(sampler_NoiseTexture, uv, 0);
+    }
+}
+
+// Main ray trace method
+RayHit Trace(Ray ray)
+{
+    RayHit bestHit = CreateRayHit();
+    // IntersectGroundPlane(ray, bestHit);
+    IntersectAlignedDisk(ray, bestHit, 3.0*horizonRadius, diskMax);
+    IntersectSphere(ray, bestHit, float4(0.0, 0.0, 0.0, horizonRadius));
+    return bestHit;
+}
+
+// Shading function
+float3 Shade(inout Ray ray, RayHit hit)
+{
+    if (hit.distance < INF)
+    {
+        // Return color of hit
+        return hit.color;
+    }
+    else
+    {
+        // Return UV sample background
+        float3 outRay = ray.direction;
+        outRay.z *= -1.0;
+        return _SkyboxTexture.SampleLevel(sampler_SkyboxTexture, outRay, 0).rgb;
+    }
+}
+
+// Main shader loop
+[numthreads(8,8,1)]
+void CSMain(uint3 id : SV_DispatchThreadID) 
+{
+
+    // Set up anti-aliasing offset
+    float2 offset = (sampleRate > 1) ? float2(0.5f, 0.5f) : float2(0.f, 0.f);
+    float angle = radians(360.f / sampleRate);
+    float2x2 rot = float2x2(cos(angle), sin(angle), -sin(angle), cos(angle));
+
+    // Initialize pixel value
+    float4 pixel;
+    float4 averagedPixel = float4(0.0, 0.0, 0.0, 1.0);
+
+    // Get index in global work group i.e x,y position
+    int2 dims;
+    Result.GetDimensions(dims.x, dims.y);
+
+    // Loop over anti-aliasing super-samples
+    for (int aaPass = 0; aaPass < sampleRate; aaPass++)
+    {
+        // Rotate offset
+        offset = mul(rot, offset);
+
+        // Base pixel colour for image
+        float4 pixel = float4(0.0, 0.0, 0.0, 1.0);
+
+        // Generate ray
+        float2 uv = float2((id.xy + float2(0.5f, 0.5f) + offset) / float2(dims.x, dims.y) * 2.0f - 1.0f);
+        Ray ray = CreateCameraRay(uv);
+
+        // Trace ray
+        RayHit hit = Trace(ray);
+        pixel.xyz = Shade(ray, hit);
+
+        // Average across MSAA samples
+        averagedPixel.xyz += pixel.xyz / float(sampleRate);
+    }
+
+    // Output to a specific pixel in the image
+    Result[id.xy] = float4(averagedPixel.xyz, 1.0);
+}

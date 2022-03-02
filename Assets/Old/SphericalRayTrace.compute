@@ -1,0 +1,273 @@
+// Each #kernel tells which function to compile; you can have many kernels
+#pragma kernel CSMain
+
+RWTexture2D<float4> Result;
+TextureCube<float4> _SkyboxTexture;
+
+float4x4 _CameraToWorld;
+float4x4 _CameraInverseProjection;
+float3   _CameraPosition;
+float3   _CameraRotation;
+
+SamplerState sampler_SkyboxTexture;
+static const float PI = 3.14159265f;
+static const float INF = 3.402823466e+38F;
+
+// Parameters
+float M;
+float alpha;
+float minStep;
+float escapeDist;
+int   maxSteps;
+bool  checkEscape;
+bool  checkHorizon;
+bool  RK4;
+bool  dynamicStep;
+
+// Observer 4-position and 4-velocity
+float4 u_obs = float4(1.0, 0.0, 0.0, 0.0);
+
+// Cartesian to Spherical coordinate conversion
+float3 ToSphericalScalar(float3 cart)
+{
+    float r = length(cart);
+    float rxy = length(cart.xy);
+    float theta = atan2(rxy, cart.z);
+    float phi = atan2(cart.y, cart.x);
+
+    return float3(r, theta, phi);
+}
+
+// Cartesian to Spherical vector conversion (inputs in cartesian)
+float3 ToSphericalVector(float3 origin, float3 dir)
+{
+    float r = length(origin);
+    float rxy = length(origin.xy);
+
+    float3x3 L = {
+        origin.x / r,                        // dr/dx
+        origin.y / r,                        // dr/dy
+        origin.z / r,                        // dr/dz
+        origin.x * origin.z / (r * r * rxy), // dtheta/dx
+        origin.y * origin.z / (r * r * rxy), // dtheta/dy
+        -rxy / (r * r),                      // dtheta/dz
+        -origin.y / rxy,                     // dphi/dx
+        origin.x / rxy,                      // dphi/dy
+        0.0                                  // dphi/dz
+    };
+
+    return mul(L, dir);
+}
+
+// Spherical to Cartesian coordinate conversion
+float3 ToCartesianScalar(float3 sph)
+{
+    float x = sph.x * cos(sph.z) * sin(sph.y);
+    float y = sph.x * sin(sph.z) * sin(sph.y);
+    float z = sph.x * cos(sph.y);
+
+    return float3(x, y, z);
+}
+
+// Spherical to Cartesian vector conversion (inputs in spherical)
+float3 ToCartesianVector(float3 origin, float3 dir)
+{
+    float x = origin.x * cos(origin.z) * sin(origin.y);
+    float y = origin.x * sin(origin.z) * sin(origin.y);
+    float z = origin.x * cos(origin.y);
+
+    float3x3 L = {
+        sin(origin.y) * cos(origin.z),              // dx/dr
+        origin.x * cos(origin.y) * cos(origin.z),   // dx/dtheta
+        -origin.x * sin(origin.y) * sin(origin.z),  // dx/dphi
+        sin(origin.y) * sin(origin.z),              // dy/dr
+        origin.x * cos(origin.y) * sin(origin.z),   // dy/dtheta
+        origin.x * sin(origin.y) * cos(origin.z),   // dy/dphi
+        cos(origin.y),                              // dz/dr
+        -origin.x * sin(origin.y),                  // dz/dtheta
+        0.0                                         // dz/dphi
+    };
+
+    return mul(L, dir);
+}
+
+// Schwarzchild metric tensor
+float4x4 Metric(float4 pos)
+{
+    return float4x4(
+        1.0, 0.0, 0.0, 0.0,
+        0.0, -1.0, 0.0, 0.0,
+        0.0, 0.0, -pos.y * pos.y, 0.0,
+        0.0, 0.0, 0.0, -pos.y * pos.y * sin(pos.z) * sin(pos.z)
+        );
+}
+
+// Index lowering function
+float4 Lower(float4 pos, float4 vec) { return mul(Metric(pos), vec); }
+
+// Reference tetrad coordinates
+float4 TetradT(float4 pos) { return float4(1.0, 0.0, 0.0, 0.0); }
+float4 TetradR(float4 pos) { return float4(0.0, 1.0, 0.0, 0.0); }
+float4 TetradTh(float4 pos) { return float4(0.0, 0.0, 1.0 / abs(pos.y), 0.0); }
+float4 TetradPh(float4 pos) { return float4(0.0, 0.0, 0.0, 1.0 / (abs(pos.y) * sin(pos.z))); }
+
+// Lorentz boost tensor
+float4x4 LorentzBoost(float4 pos)
+{
+    float4 T = TetradT(pos);
+    float gamma = dot(Lower(pos, T), u_obs);
+    float4x4 boost = { { 0.0f, 0.0f, 0.0f, 0.0f }, { 0.0f , 0.0f, 0.0f, 0.0f }, { 0.0f , 0.0f, 0.0f, 0.0f }, { 0.0f , 0.0f, 0.0f, 0.0f } };
+    float4x4 delta = { { 1.0f , 0.0f, 0.0f, 0.0f }, { 0.0f , 1.0f, 0.0f, 0.0f }, { 0.0f , 0.0f, 1.0f, 0.0f }, { 0.0f , 0.0f, 0.0f, 1.0f } };
+
+    for (int row = 0; row < 4; row++) {
+        for (int col = 0; col < 4; col++) {
+            float boostVal = 0.f;
+            boostVal += delta[row][col];
+            boostVal -= (1.0 / (1.0 + gamma)) * (T[row] + u_obs[row]) * (T[col] + u_obs[col]);
+            boostVal += 2.0 * u_obs[row] * T[col];
+            boost[row][col] = boostVal;
+        }
+    }
+    return boost;
+}
+
+// Boosted reference spacelike vectors
+float4 RefA(float4 pos) { return mul(LorentzBoost(pos), TetradTh(pos)); }
+float4 RefB(float4 pos) { return mul(LorentzBoost(pos), TetradPh(pos)); }
+float4 RefC(float4 pos) { return mul(LorentzBoost(pos), TetradR(pos)); }
+
+
+// Combined setup function for camera normal 4-vector
+float4 GenerateCameraNormal(float4 pos, float3 eulerAngles, int2 dims, int2 coords)
+{
+    float phi = radians(eulerAngles.z);
+    float theta = radians(eulerAngles.x);
+    float psi = radians(eulerAngles.y);
+
+    float cx = float(coords.x);
+    float cy = float(coords.y);
+    float dx = float(dims.x);
+    float dy = float(dims.y);
+
+    // Camera vector rotation process
+    float4 A = RefA(pos);
+    float4 B = RefB(pos);
+    float4 C = RefC(pos);
+    float4 Ap = cos(phi) * A + sin(phi) * B;
+    float4 Bp = -sin(phi) * A + cos(phi) * B;
+    float4 Z = cos(theta) * C + sin(theta) * Ap;
+    float4 App = -sin(theta) * C + cos(theta) * Ap;
+    float4 X = cos(psi) * App + sin(psi) * Bp;
+    float4 Y = -sin(psi) * App + cos(psi) * Bp;
+
+    // Calculate intermediate vector W
+    float4 W = { 0.0f , 0.0f, 0.0f, 0.0f };
+    W += (cx - ((dx + 1.0) / 2.0)) * X;
+    W += (cy - ((dy + 1.0) / 2.0)) * Y;
+    W *= 2.0 * tan(alpha / 2.0) / dx;
+    W += Z;
+
+    // Calculate normal vector
+    float4 N = { 0.0f , 0.0f, 0.0f, 0.0f };
+    N += W;
+    N /= -1.0 * dot(Lower(pos, W), W);
+    N *= 2.0;
+    N -= Z;
+
+    return N;
+}
+
+// Calculate change in k along geodesic affine parameter
+double4 CalculateGeodesicDerivative(double4 pos, double4 k)
+{
+    // Pre-calculate factors
+    double r = pos.y;
+    double th = pos.z;
+
+    // Calculate derivative
+    double4 deriv;
+    deriv[0] = 0.0;
+    deriv[1] = r * (k[2] * k[2] + sin(th) * sin(th) * k[3] * k[3]);
+    deriv[2] = (-2.0 / r) * k[1] * k[3] + sin(th) * cos(th) * k[3] * k[3];
+    deriv[3] = (-2.0 / r) * k[1] * k[3] - 2.0 * (cos(th) / sin(th)) * k[2] * k[3];
+    return deriv;
+}
+
+// Runge-Kutta 4th Order integration
+double4 RK4Step(double4 pos, double pStep, inout double4 k)
+{
+    // Calculate offset positions using affine parameter step
+    double4 p2 = pos + k * 0.5 * pStep;
+    double4 p4 = pos + k * pStep;
+
+    // Calculate k-factors
+    double4 k1 = CalculateGeodesicDerivative(pos, k);
+    double4 k2 = CalculateGeodesicDerivative(p2, k + k1 * 0.5 * pStep);
+    double4 k3 = CalculateGeodesicDerivative(p2, k + k2 * 0.5 * pStep);
+    double4 k4 = CalculateGeodesicDerivative(p4, k + k3 * pStep);
+
+    // Calculate full update
+    k += (pStep / 6.0) * (k1 + 2.0 * k2 + 2.0 * k3 + k4);
+    return pos + k * pStep;
+}
+
+// Main shader loop
+[numthreads(8, 8, 1)]
+void CSMain(uint3 id : SV_DispatchThreadID)
+{
+    // Get dimension of output texture
+    int2 dims;
+    Result.GetDimensions(dims.x, dims.y);
+
+    // Generate camera vectors
+    float4 x_obs = float4(0.0f, _CameraPosition);
+    float4 N = GenerateCameraNormal(x_obs, _CameraRotation, dims, id.xy);
+
+    // Generate motion coordinates
+    double4 k = u_obs - N;
+    double4 x = x_obs;
+
+    // Set up outputs
+    float3 pixelColor = { 1.0f, 0.0f, 0.0f };
+
+    // Propagation loop 
+    // While not timed out, not crossed horizon, not intersected with disk, and not reached infinity:
+    for (int steps = 0; steps < maxSteps; steps++)
+    {
+        // Generate step size
+        double pStepSize = minStep;
+
+        // Propagate along geodesic
+        if (RK4)
+        {
+            x = RK4Step(x, pStepSize, k);
+        }
+        else
+        {
+            k += pStepSize * CalculateGeodesicDerivative(x, k);
+            x += pStepSize * k;
+        }
+
+        // Check for horizon condition
+        if (checkHorizon && abs(x[1] < M))
+        {
+            // Return black (a la the hole)
+            pixelColor = float3(0.f, 0.f, 0.f);
+            break;
+        }
+
+        // Check for escape condition
+        if (checkEscape && (abs(x[1]) > escapeDist))
+        {
+            // Use angles to determine background texture point
+            float3 outRay = ToCartesianScalar(x.yzw).xyz;
+            pixelColor = _SkyboxTexture.SampleLevel(sampler_SkyboxTexture, outRay, 0).rgb;
+            break;
+        }
+    }
+
+    // Output result to a specific pixel in the image
+    Result[id.xy] = float4(pixelColor.xyz, 1.0);
+    //Result[id.xy] = float4(ToCartesian(x.yzw).xzy, 1.0);
+    //Result[id.xy] = float4(ToCartesian(k.yzw).zyx, 1.0);
+}

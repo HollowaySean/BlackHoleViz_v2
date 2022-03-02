@@ -17,7 +17,11 @@ public class RayTraceCamera : MonoBehaviour
         diskMax = 4f,
         updateInterval = 1f;
     public int
-        scaleFactor = 4;
+        scaleFactor = 4,
+        noiseWidth = 512;
+    public Vector2
+        noiseOrigin = new Vector2(0f, 0f),
+        noiseScale = new Vector2(1f, 1f);
     public bool
         saveToFile = false;
     public string
@@ -28,6 +32,7 @@ public class RayTraceCamera : MonoBehaviour
     private RenderTexture _direction;
     private RenderTexture _color;
     private RenderTexture _isComplete;
+    private Texture2D _NoiseTexture;
 
     private float
         checkTimer = 0f;
@@ -39,6 +44,32 @@ public class RayTraceCamera : MonoBehaviour
 
     private void Awake() {
         _camera = GetComponent<Camera>();
+        _NoiseTexture = new Texture2D(noiseWidth, noiseWidth);
+        UpdateNoiseTexture();
+    }
+
+    private void UpdateNoiseTexture() {
+
+        // Create texture object
+        Color[] pix = new Color[noiseWidth * noiseWidth];
+
+        // Loop through pixels and apply noise
+        float y = 0f;
+        while (y < noiseWidth) {
+            float x = 0f;
+            while (x < noiseWidth) {
+                float xCoord = noiseOrigin.x + (x * noiseScale.x) / noiseWidth;
+                float yCoord = noiseOrigin.y + (y * noiseScale.y) / noiseWidth;
+                float sample = Mathf.PerlinNoise(xCoord, yCoord);
+                pix[(int)y * noiseWidth + (int)x] = new Color(sample, sample, sample);
+                x++;
+            }
+            y++;
+        }
+
+        // Send to texture
+        _NoiseTexture.SetPixels(pix);
+        _NoiseTexture.Apply();
     }
 
     private void InitRenderTextures() {
@@ -80,6 +111,7 @@ public class RayTraceCamera : MonoBehaviour
 
         // Send render parameters to update shader
         rayUpdateShader.SetTexture(0, "_SkyboxTexture", skyboxTexture);
+        rayUpdateShader.SetTexture(0, "_NoiseTexture", _NoiseTexture);
         rayUpdateShader.SetFloat("timeStep", timeStep);
         rayUpdateShader.SetFloat("escapeDistance", escapeDistance);
         rayUpdateShader.SetFloat("horizonRadius", horizonRadius);
@@ -103,6 +135,7 @@ public class RayTraceCamera : MonoBehaviour
         // Step through ray trace if not complete
         if (!renderComplete) {
             if (startRender) {
+                UpdateNoiseTexture();
                 SetShaderParameters();
                 GenerateCameraVectors();
                 startRender = false;
@@ -115,6 +148,11 @@ public class RayTraceCamera : MonoBehaviour
                 checkTimer = Time.time;
                 CheckCompleteness();
             }
+        }
+
+        // Manually save on S key
+        if (Input.GetKeyDown(KeyCode.S)) {
+            SaveToPNG();
         }
     }
 

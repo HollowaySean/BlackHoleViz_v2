@@ -109,6 +109,6 @@ void CSMain (uint3 id : SV_DispatchThreadID)
     // Pass direction to result
     Position[id.xy] = float4(originSph, 0.0);
     Direction[id.xy] = float4(directionSph, 0.0);
-    Color[id.xy] = float4(0.0, 0.0, 0.0, 1.0);
+    Color[id.xy] = float4(0.0, 0.0, 0.0, 0.0);
     isComplete[id.xy] = 0;
 }
