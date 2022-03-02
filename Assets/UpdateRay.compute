@@ -3,7 +3,6 @@
 
 // Constants
 static const float PI = 3.14159265f;
-static float4 diskColor = float4(1.5 * float3(1.0, 1.0, 0.85), 1.0);
 
 // Output parameters
 RWTexture2D<float4> Position;
@@ -14,10 +13,12 @@ RWTexture2D<int> isComplete;
 // Input parameters
 TextureCube<float4> _SkyboxTexture;
 Texture2D<float3> _NoiseTexture;
+float4 diskColor;
 float timeStep;
 float escapeDistance;
 float horizonRadius;
 float diskMax;
+float diskMult;
 
 // Samplers
 SamplerState sampler_Position;
@@ -177,7 +178,7 @@ float4 GetDiskColor(float3 x, float3 xLast)
     texColor *= max((1.0 - uv.x), 0.0);
 
     // Return adjusted color
-    return texColor * diskColor;
+    return texColor * diskColor * float4(diskMult.xxx, 1.0);
 }
 
 // Blend transparency and background colors

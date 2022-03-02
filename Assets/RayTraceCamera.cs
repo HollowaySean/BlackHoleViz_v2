@@ -15,6 +15,7 @@ public class RayTraceCamera : MonoBehaviour
         escapeDistance = 10000f,
         horizonRadius = 0.5f,
         diskMax = 4f,
+        diskMult = 1f,
         updateInterval = 1f;
     public int
         scaleFactor = 4,
@@ -22,6 +23,8 @@ public class RayTraceCamera : MonoBehaviour
     public Vector2
         noiseOrigin = new Vector2(0f, 0f),
         noiseScale = new Vector2(1f, 1f);
+    public Color
+        diskColor = new Color(1f, 1f, 1f, 1f);
     public bool
         saveToFile = false;
     public string
@@ -116,6 +119,8 @@ public class RayTraceCamera : MonoBehaviour
         rayUpdateShader.SetFloat("escapeDistance", escapeDistance);
         rayUpdateShader.SetFloat("horizonRadius", horizonRadius);
         rayUpdateShader.SetFloat("diskMax", diskMax);
+        rayUpdateShader.SetFloat("diskMult", diskMult);
+        rayUpdateShader.SetVector("diskColor", diskColor);
     }
 
     private void OnRenderImage(RenderTexture source, RenderTexture destination) {
@@ -152,7 +157,7 @@ public class RayTraceCamera : MonoBehaviour
 
         // Manually save on S key
         if (Input.GetKeyDown(KeyCode.S)) {
-            SaveToPNG();
+            SaveToFile();
         }
     }
 
@@ -224,17 +229,18 @@ public class RayTraceCamera : MonoBehaviour
         Debug.Log("Render complete!\nTime Elapsed: " + Time.realtimeSinceStartup.ToString());
 
         // Save PNG
-        if(saveToFile) { SaveToPNG(); }
+        if(saveToFile) { SaveToFile(); }
 
     }
 
-    private void SaveToPNG() {
+    private void SaveToFile() {
 
         // Create texture2D from render texture
         Texture2D colorTex = RenderToTexture(_color, TextureFormat.RGBAFloat);
 
         // Encode to PNG
-        byte[] bytes = colorTex.EncodeToPNG();
+        //byte[] bytes = colorTex.EncodeToPNG();
+        byte[] bytes = colorTex.EncodeToJPG();
         Destroy(colorTex);
 
         // Save to file
@@ -242,7 +248,8 @@ public class RayTraceCamera : MonoBehaviour
 
             // Set up filename and save
             string filename = string.IsNullOrEmpty(filenamePrefix) ? "" : filenamePrefix + "_";
-            filename += System.DateTime.Now.ToString("MMddyyyy_hhmmss") + ".png";
+            //filename += System.DateTime.Now.ToString("MMddyyyy_hhmmss") + ".png";
+            filename += System.DateTime.Now.ToString("MMddyyyy_hhmmss") + ".jpg";
             File.WriteAllBytes(Application.dataPath + "/Output/" + filename, bytes);
 
             Debug.Log("File saved.");
