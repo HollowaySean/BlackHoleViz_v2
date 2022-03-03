@@ -328,7 +328,7 @@ GameObject:
   m_Icon: {fileID: 0}
   m_NavMeshLayer: 0
   m_StaticEditorFlags: 0
-  m_IsActive: 0
+  m_IsActive: 1
 --- !u!4 &892932887
 Transform:
   m_ObjectHideFlags: 0
@@ -357,12 +357,15 @@ MonoBehaviour:
   m_EditorClassIdentifier: 
   RayTracingShader: {fileID: 7200000, guid: c1ca5e66a97a7a64297a3d7f474f0fd0, type: 3}
   SkyboxTexture: {fileID: 8900000, guid: e8e1bea99525f9a4da79fb1967fb3e11, type: 2}
+  BlackbodyTexture: {fileID: 2800000, guid: 6f8d983e2bb4a704d917864debb8b649, type: 3}
   horizonRadius: 0.5
-  diskMax: 2
+  diskMax: 3.2
+  diskMult: 1
+  diskTemp: 10000
   sampleRate: 1
   noiseWidth: 512
-  noiseOrigin: {x: 0, y: 0}
-  noiseScale: {x: 7, y: 10}
+  noiseOrigin: {x: 15.77, y: 98.11}
+  noiseScale: {x: 41.2, y: 23.4}
 --- !u!20 &892932889
 Camera:
   m_ObjectHideFlags: 0
@@ -507,17 +510,18 @@ MonoBehaviour:
   cameraVectorShader: {fileID: 7200000, guid: eff2d974d7c28b547b5fab968065b5ac, type: 3}
   rayUpdateShader: {fileID: 7200000, guid: 803f7e0016463014e9ad9f41a0735930, type: 3}
   skyboxTexture: {fileID: 8900000, guid: e8e1bea99525f9a4da79fb1967fb3e11, type: 2}
+  BlackbodyTexture: {fileID: 2800000, guid: 6f8d983e2bb4a704d917864debb8b649, type: 3}
   timeStep: 0.001
   escapeDistance: 10000
   horizonRadius: 0.5
   diskMax: 3.2
   diskMult: 4
   updateInterval: 5
-  scaleFactor: 8
+  diskTemp: 10000
+  scaleFactor: 1
   noiseWidth: 512
   noiseOrigin: {x: 15.77, y: 98.11}
   noiseScale: {x: 41.2, y: 23.4}
-  diskColor: {r: 1, g: 0.74028856, b: 0.4481132, a: 1}
   saveToFile: 0
   filenamePrefix: test
 --- !u!1 &966637174

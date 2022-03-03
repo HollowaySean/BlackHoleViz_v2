@@ -11,17 +11,30 @@ RWTexture2D<float4> Result;
 // Input parameters
 TextureCube<float4> _SkyboxTexture;
 Texture2D<float3> _NoiseTexture;
+Texture2D<float3> _BlackbodyTexture;
 float4x4 _CameraToWorld;
 float4x4 _CameraInverseProjection;
 
 // Input Parameters
 float horizonRadius;
 float diskMax;
+float diskTemp;
+float diskMult;
 int sampleRate;
 
 // Samplers
 SamplerState sampler_SkyboxTexture;
 SamplerState sampler_NoiseTexture;
+SamplerState sampler_BlackbodyTexture;
+
+
+// Blend transparency and background colors
+float4 Blend(float4 foreColor, float4 backColor)
+{
+    // Blend using previous color's alpha
+    float4 outColor = foreColor + backColor * (1.0 - foreColor.w);
+    return outColor;
+}
 
 // Ray data type
 struct Ray
@@ -60,7 +73,7 @@ struct RayHit
     float3 position;
     float distance;
     float3 normal;
-    float3 color;
+    float4 color;
 };
 
 // Ray hit creation method
@@ -70,7 +83,7 @@ RayHit CreateRayHit()
     hit.position = float3(0.0, 0.0, 0.0);
     hit.distance = INF;
     hit.normal = float3(0.0, 0.0, 0.0);
-    hit.color = float3(0.0, 0.0, 0.0);
+    hit.color = float4(0.0, 0.0, 0.0, 0.0);
     return hit;
 }
 
@@ -90,9 +103,14 @@ void IntersectSphere(Ray ray, inout RayHit bestHit, float4 sphere)
         bestHit.distance = t;
         bestHit.position = ray.origin + t * ray.direction;
         bestHit.normal = normalize(bestHit.position - sphere.xyz);
-        bestHit.color = float3(0.0, 0.0, 0.0);
+        //bestHit.color = Blend(bestHit.color, float4(0.0, 0.0, 0.0, 1.0));
+        bestHit.color = float4(0.0, 0.0, 0.0, 1.0);
     }
 }
+
+// Declarations
+RayHit SecondTrace(Ray ray);
+float4 Shade(inout Ray ray, RayHit hit);
 
 // Aligned disk intersection check
 void IntersectAlignedDisk(Ray ray, inout RayHit bestHit, float r1, float r2)
@@ -112,10 +130,46 @@ void IntersectAlignedDisk(Ray ray, inout RayHit bestHit, float r1, float r2)
         bestHit.normal = float3(0.0, 1.0, 0.0);
 
         // Sample noise texture
+        float r = sqrt(p);
+        float phi = atan2(z, -x);
         float2 uv;
-        uv.x = (sqrt(p) - r1) / (r2 - r1);
-        uv.y = atan2(z, x) / (2.0 * PI);
-        bestHit.color = _NoiseTexture.SampleLevel(sampler_NoiseTexture, uv, 0);
+        uv.x = (r - r1) / (r2 - r1);
+        uv.y = ((atan2(z, -x) / (2.0 * PI)) + 0.5);
+        float texColor = _NoiseTexture.SampleLevel(sampler_NoiseTexture, uv, 0).x;
+
+        // Reduce intensity over distance
+        texColor *= max((1.0 - uv.x), 0.0);
+
+        // Calculate temperature
+        float rFactor = pow(abs(r1 / r), 0.75);
+        float T = diskTemp * rFactor;
+
+        // Calculate doppler shift
+        float v = sqrt(horizonRadius / (2.0 * r));
+        float gamma = 1.0 / sqrt(1.0 - (v * v));
+        float shift = gamma * (1.0 + v * sin(phi));
+
+        // Relativistic beaming
+        texColor *= pow(abs(shift), 1.5);
+
+        // Calculate gravitational redshift
+        shift *= sqrt(1 - (horizonRadius / r));
+
+        // Sample blackbody texture
+        uv.x = (shift - 0.5) / (2.0 - 0.5);
+        uv.y = (T - 1000.0) / (10000.0 - 1000.0);
+        float3 bbColor = _BlackbodyTexture.SampleLevel(sampler_BlackbodyTexture, uv, 0);
+
+        // Weight by noise strength and multiplier
+        float4 outColor = texColor.xxxx * float4(bbColor.xyz, 1.0) * float4(diskMult.xxx, 1.0);
+
+        // Cast a new ray, to obtain transparency
+        // A hacky solution, I know, but this is merely the test camera
+        Ray secondRay = CreateRay(bestHit.position, ray.direction);
+        RayHit secondHit = SecondTrace(secondRay);
+
+        // Return alpha blended result
+        bestHit.color = Blend(outColor, Shade(secondRay, secondHit));
     }
 }
 
@@ -123,14 +177,21 @@ void IntersectAlignedDisk(Ray ray, inout RayHit bestHit, float r1, float r2)
 RayHit Trace(Ray ray)
 {
     RayHit bestHit = CreateRayHit();
-    // IntersectGroundPlane(ray, bestHit);
     IntersectAlignedDisk(ray, bestHit, 3.0*horizonRadius, diskMax);
     IntersectSphere(ray, bestHit, float4(0.0, 0.0, 0.0, horizonRadius));
     return bestHit;
 }
 
+// Secondary ray trace for transparent disc
+RayHit SecondTrace(Ray ray)
+{
+    RayHit bestHit = CreateRayHit();
+    IntersectSphere(ray, bestHit, float4(0.0, 0.0, 0.0, horizonRadius));
+    return bestHit;
+}
+
 // Shading function
-float3 Shade(inout Ray ray, RayHit hit)
+float4 Shade(inout Ray ray, RayHit hit)
 {
     if (hit.distance < INF)
     {
@@ -142,7 +203,9 @@ float3 Shade(inout Ray ray, RayHit hit)
         // Return UV sample background
         float3 outRay = ray.direction;
         outRay.z *= -1.0;
-        return _SkyboxTexture.SampleLevel(sampler_SkyboxTexture, outRay, 0).rgb;
+        float4 texColor = _SkyboxTexture.SampleLevel(sampler_SkyboxTexture, outRay, 0);
+        //return Blend(hit.color, texColor);
+        return texColor;
     }
 }
 
@@ -179,7 +242,7 @@ void CSMain(uint3 id : SV_DispatchThreadID)
 
         // Trace ray
         RayHit hit = Trace(ray);
-        pixel.xyz = Shade(ray, hit);
+        pixel.xyz = Shade(ray, hit).xyz;
 
         // Average across MSAA samples
         averagedPixel.xyz += pixel.xyz / float(sampleRate);

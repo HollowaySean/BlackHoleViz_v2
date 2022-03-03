@@ -6,10 +6,14 @@ public class ReferenceRayTraceCamera : MonoBehaviour
 {
     public ComputeShader RayTracingShader;
     public Texture SkyboxTexture;
+    public Texture BlackbodyTexture;
 
     public float
         horizonRadius = 0.5f,
-        diskMax = 2f;
+        diskMax = 2f,
+        diskMult = 1f;
+    [Range(1E3F, 1E4F)]
+    public float diskTemp = 1E4F;
     public int
         sampleRate = 1,
         noiseWidth = 512;
@@ -25,6 +29,8 @@ public class ReferenceRayTraceCamera : MonoBehaviour
         _camera = GetComponent<Camera>();
         _NoiseTexture = new Texture2D(noiseWidth, noiseWidth);
         UpdateNoiseTexture();
+        _NoiseTexture.wrapMode = TextureWrapMode.Clamp;
+        BlackbodyTexture.wrapMode = TextureWrapMode.Clamp;
     }
 
     private void UpdateNoiseTexture() {
@@ -56,8 +62,11 @@ public class ReferenceRayTraceCamera : MonoBehaviour
         RayTracingShader.SetMatrix("_CameraInverseProjection", _camera.projectionMatrix.inverse);
         RayTracingShader.SetTexture(0, "_SkyboxTexture", SkyboxTexture);
         RayTracingShader.SetTexture(0, "_NoiseTexture", _NoiseTexture);
+        RayTracingShader.SetTexture(0, "_BlackbodyTexture", BlackbodyTexture);
         RayTracingShader.SetFloat("horizonRadius", horizonRadius);
         RayTracingShader.SetFloat("diskMax", diskMax);
+        RayTracingShader.SetFloat("diskTemp", diskTemp);
+        RayTracingShader.SetFloat("diskMult", diskMult);
         RayTracingShader.SetInt("sampleRate", sampleRate);
     }
 

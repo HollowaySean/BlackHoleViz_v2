@@ -9,6 +9,7 @@ public class RayTraceCamera : MonoBehaviour
     public ComputeShader rayUpdateShader;
 
     public Cubemap skyboxTexture;
+    public Texture BlackbodyTexture;
 
     public float
         timeStep = 0.001f,
@@ -17,14 +18,14 @@ public class RayTraceCamera : MonoBehaviour
         diskMax = 4f,
         diskMult = 1f,
         updateInterval = 1f;
+    [Range(1E3F, 1E4F)]
+    public float diskTemp = 1E4F;
     public int
         scaleFactor = 4,
         noiseWidth = 512;
     public Vector2
         noiseOrigin = new Vector2(0f, 0f),
         noiseScale = new Vector2(1f, 1f);
-    public Color
-        diskColor = new Color(1f, 1f, 1f, 1f);
     public bool
         saveToFile = false;
     public string
@@ -115,12 +116,13 @@ public class RayTraceCamera : MonoBehaviour
         // Send render parameters to update shader
         rayUpdateShader.SetTexture(0, "_SkyboxTexture", skyboxTexture);
         rayUpdateShader.SetTexture(0, "_NoiseTexture", _NoiseTexture);
+        rayUpdateShader.SetTexture(0, "_BlackbodyTexture", BlackbodyTexture);
         rayUpdateShader.SetFloat("timeStep", timeStep);
         rayUpdateShader.SetFloat("escapeDistance", escapeDistance);
         rayUpdateShader.SetFloat("horizonRadius", horizonRadius);
         rayUpdateShader.SetFloat("diskMax", diskMax);
         rayUpdateShader.SetFloat("diskMult", diskMult);
-        rayUpdateShader.SetVector("diskColor", diskColor);
+        rayUpdateShader.SetFloat("diskTemp", diskTemp);
     }
 
     private void OnRenderImage(RenderTexture source, RenderTexture destination) {

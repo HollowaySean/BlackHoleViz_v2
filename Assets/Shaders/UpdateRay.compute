@@ -13,11 +13,12 @@ RWTexture2D<int> isComplete;
 // Input parameters
 TextureCube<float4> _SkyboxTexture;
 Texture2D<float3> _NoiseTexture;
-float4 diskColor;
+Texture2D<float3> _BlackbodyTexture;
 float timeStep;
 float escapeDistance;
 float horizonRadius;
 float diskMax;
+float diskTemp;
 float diskMult;
 
 // Samplers
@@ -26,6 +27,7 @@ SamplerState sampler_Direction;
 SamplerState sampler_isComplete;
 SamplerState sampler_SkyboxTexture;
 SamplerState sampler_NoiseTexture;
+SamplerState sampler_BlackbodyTexture;
 
 // Calculate change in k along geodesic affine parameter
 void CalculateGeodesicDerivative(float3 x, float3 u, out float3 dx, out float3 du)
@@ -177,8 +179,31 @@ float4 GetDiskColor(float3 x, float3 xLast)
     // Reduce intensity over distance
     texColor *= max((1.0 - uv.x), 0.0);
 
+    // Calculate temperature
+    float rFactor = pow(abs(3.0 * horizonRadius / rEval), 0.75);
+    float T = diskTemp * rFactor;
+
+    // Calculate doppler shift
+    float v = sqrt(horizonRadius / (2.0 * rEval));
+    float gamma = 1.0 / sqrt(1.0 - (v * v));
+    float shift = gamma * (1.0 + v * sin(phEval));
+
+    // Relativistic beaming
+    texColor *= shift * shift;
+
+    // Calculate gravitational redshift
+    shift *= sqrt(1 - (horizonRadius / rEval));
+
+    // Sample blackbody texture
+    uv.x = (shift - 0.5) / (2.0 - 0.5);
+    uv.y = (T - 1000.0) / (10000.0 - 1000.0);
+    float3 bbColor = _BlackbodyTexture.SampleLevel(sampler_BlackbodyTexture, uv, 0);
+
+    // Weight by noise strength and multiplier
+    float4 outColor = texColor.xxxx * float4(bbColor.xyz, 1.0) * float4(diskMult.xxx, 1.0);
+
     // Return adjusted color
-    return texColor * diskColor * float4(diskMult.xxx, 1.0);
+    return outColor;
 }
 
 // Blend transparency and background colors
