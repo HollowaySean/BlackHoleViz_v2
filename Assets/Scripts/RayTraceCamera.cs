@@ -7,6 +7,7 @@ public class RayTraceCamera : MonoBehaviour
 {
     public ComputeShader cameraVectorShader;
     public ComputeShader rayUpdateShader;
+    public ComputeShader simpleRayTracingShader;
 
     public Cubemap skyboxTexture;
     public Texture BlackbodyTexture;
@@ -28,15 +29,20 @@ public class RayTraceCamera : MonoBehaviour
         noiseOrigin = new Vector2(0f, 0f),
         noiseScale = new Vector2(1f, 1f);
     public bool
+        liveNoiseUpdate = false,
         saveToFile = false;
     public string
         filenamePrefix = "";
+
+    public enum CameraState { relativistic, simple, unity };
+    public CameraState cameraState = CameraState.relativistic;
 
     private Camera _camera;
     private RenderTexture _position;
     private RenderTexture _direction;
     private RenderTexture _color;
     private RenderTexture _isComplete;
+    private RenderTexture _simpleTarget;
     private Texture2D _NoiseTexture;
 
     private float
@@ -51,6 +57,8 @@ public class RayTraceCamera : MonoBehaviour
         _camera = GetComponent<Camera>();
         _NoiseTexture = new Texture2D(noiseWidth, noiseWidth);
         UpdateNoiseTexture();
+        _NoiseTexture.wrapMode = TextureWrapMode.Clamp;
+        BlackbodyTexture.wrapMode = TextureWrapMode.Clamp;
     }
 
     private void UpdateNoiseTexture() {
@@ -85,6 +93,11 @@ public class RayTraceCamera : MonoBehaviour
         SetupTexture(ref _isComplete,   RenderTextureFormat.RInt);
     }
 
+    private void InitSimpleRenderTexture() {
+
+        SetupTexture(ref _simpleTarget, RenderTextureFormat.ARGBFloat);
+    }
+
     private void SetupTexture(ref RenderTexture texture, RenderTextureFormat format) {
 
         if (texture == null || texture.width != scaleFactor * Screen.width || texture.height != scaleFactor * Screen.height) {
@@ -99,6 +112,7 @@ public class RayTraceCamera : MonoBehaviour
             texture.Create();
         }
     }
+
     private void SetShaderParameters() {
 
         // Pre-convert camera position to spherical
@@ -127,13 +141,54 @@ public class RayTraceCamera : MonoBehaviour
         rayUpdateShader.SetFloat("diskTemp", diskTemp);
     }
 
+    private void SetSimpleShaderParameters() {
+        simpleRayTracingShader.SetMatrix("_CameraToWorld", _camera.cameraToWorldMatrix);
+        simpleRayTracingShader.SetMatrix("_CameraInverseProjection", _camera.projectionMatrix.inverse);
+        simpleRayTracingShader.SetTexture(0, "_SkyboxTexture", skyboxTexture);
+        simpleRayTracingShader.SetTexture(0, "_NoiseTexture", _NoiseTexture);
+        simpleRayTracingShader.SetTexture(0, "_BlackbodyTexture", BlackbodyTexture);
+        simpleRayTracingShader.SetFloat("horizonRadius", horizonRadius);
+        simpleRayTracingShader.SetFloat("diskMax", diskMax);
+        simpleRayTracingShader.SetFloat("diskTemp", diskTemp);
+        simpleRayTracingShader.SetFloat("diskMult", diskMult);
+        simpleRayTracingShader.SetFloat("starMult", starMult);
+        simpleRayTracingShader.SetInt("sampleRate", scaleFactor);
+    }
+
     private void OnRenderImage(RenderTexture source, RenderTexture destination) {
 
-        // Blit the result texture to the screen
-        Graphics.Blit(_color, destination);
+        switch(cameraState) {
+            case CameraState.relativistic:
+                Graphics.Blit(_color, destination);
+                break;
+            case CameraState.simple:
+                SetSimpleShaderParameters();
+                RenderSimple(destination);
+                break;
+            case CameraState.unity:
+                Graphics.Blit(source, destination);
+                break;
+        }
+
     }
 
     private void Update() {
+
+        // Skip if using built in render camera
+        if(cameraState == CameraState.unity) {
+            return;
+        }
+
+        // Manually save on S key
+        if (Input.GetKeyDown(KeyCode.S)) {
+            SaveToFile(cameraState == CameraState.relativistic ? _color : _simpleTarget);
+        }
+
+        // Update noise and skip if using simple renderer
+        if(cameraState == CameraState.simple) {
+            if (liveNoiseUpdate) { UpdateNoiseTexture(); }
+            return;
+        }
 
         // Restart render on spacebar
         if (Input.GetKeyDown(KeyCode.Space)) {
@@ -157,11 +212,6 @@ public class RayTraceCamera : MonoBehaviour
                 checkTimer = Time.time;
                 CheckCompleteness();
             }
-        }
-
-        // Manually save on S key
-        if (Input.GetKeyDown(KeyCode.S)) {
-            SaveToFile();
         }
     }
 
@@ -190,6 +240,19 @@ public class RayTraceCamera : MonoBehaviour
         int threadGroupsX = Mathf.CeilToInt(scaleFactor * Screen.width / numThreads);
         int threadGroupsY = Mathf.CeilToInt(scaleFactor * Screen.height / numThreads);
         rayUpdateShader.Dispatch(0, threadGroupsX, threadGroupsY, 1);
+    }
+
+
+    private void RenderSimple(RenderTexture destination) {
+        // Make sure we have a current render target
+        InitSimpleRenderTexture();
+        // Set the target and dispatch the compute shader
+        simpleRayTracingShader.SetTexture(0, "Result", _simpleTarget);
+        int threadGroupsX = Mathf.CeilToInt(Screen.width / 8.0f);
+        int threadGroupsY = Mathf.CeilToInt(Screen.height / 8.0f);
+        simpleRayTracingShader.Dispatch(0, threadGroupsX, threadGroupsY, 1);
+        // Blit the result texture to the screen
+        Graphics.Blit(_simpleTarget, destination);
     }
 
     private Texture2D RenderToTexture(RenderTexture rt, TextureFormat format) {
@@ -233,14 +296,14 @@ public class RayTraceCamera : MonoBehaviour
         Debug.Log("Render complete!\nTime Elapsed: " + Time.realtimeSinceStartup.ToString());
 
         // Save PNG
-        if(saveToFile) { SaveToFile(); }
+        if(saveToFile) { SaveToFile(_color); }
 
     }
 
-    private void SaveToFile() {
+    private void SaveToFile(RenderTexture saveTexture) {
 
         // Create texture2D from render texture
-        Texture2D colorTex = RenderToTexture(_color, TextureFormat.RGBAFloat);
+        Texture2D colorTex = RenderToTexture(saveTexture, TextureFormat.RGBAFloat);
 
         // Encode to PNG
         //byte[] bytes = colorTex.EncodeToPNG();
