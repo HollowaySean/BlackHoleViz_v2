@@ -328,7 +328,7 @@ GameObject:
   m_Icon: {fileID: 0}
   m_NavMeshLayer: 0
   m_StaticEditorFlags: 0
-  m_IsActive: 1
+  m_IsActive: 0
 --- !u!4 &892932887
 Transform:
   m_ObjectHideFlags: 0
@@ -360,7 +360,8 @@ MonoBehaviour:
   BlackbodyTexture: {fileID: 2800000, guid: 6f8d983e2bb4a704d917864debb8b649, type: 3}
   horizonRadius: 0.5
   diskMax: 3.2
-  diskMult: 1
+  diskMult: 4
+  starMult: 1
   diskTemp: 10000
   sampleRate: 1
   noiseWidth: 512
@@ -516,8 +517,9 @@ MonoBehaviour:
   horizonRadius: 0.5
   diskMax: 3.2
   diskMult: 4
+  starMult: 1
   updateInterval: 5
-  diskTemp: 10000
+  diskTemp: 8000
   scaleFactor: 1
   noiseWidth: 512
   noiseOrigin: {x: 15.77, y: 98.11}

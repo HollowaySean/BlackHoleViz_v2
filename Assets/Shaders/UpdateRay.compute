@@ -20,6 +20,7 @@ float horizonRadius;
 float diskMax;
 float diskTemp;
 float diskMult;
+float starMult;
 
 // Samplers
 SamplerState sampler_Position;
@@ -186,7 +187,9 @@ float4 GetDiskColor(float3 x, float3 xLast)
     // Calculate doppler shift
     float v = sqrt(horizonRadius / (2.0 * rEval));
     float gamma = 1.0 / sqrt(1.0 - (v * v));
-    float shift = gamma * (1.0 + v * sin(phEval));
+    float3 xDiff = xLast - x;
+    float incidence = xDiff.z * rEval / length(xDiff * float3(1.0, rEval, rEval));
+    float shift = gamma * (1.0 + v * incidence);
 
     // Relativistic beaming
     texColor *= shift * shift;
@@ -258,6 +261,7 @@ void CSMain (uint3 id : SV_DispatchThreadID)
         float3 outRay = ToCartesianScalar(x.xyz).xyz;
         outRay.z *= -1.0;
         float4 skyboxColor = _SkyboxTexture.SampleLevel(sampler_SkyboxTexture, outRay, 0);
+        skyboxColor *= float4(starMult.xxx, 1.0);
 
         // Blend with previous color value
         Color[id.xy] = Blend(Color[id.xy], skyboxColor);

@@ -11,7 +11,8 @@ public class ReferenceRayTraceCamera : MonoBehaviour
     public float
         horizonRadius = 0.5f,
         diskMax = 2f,
-        diskMult = 1f;
+        diskMult = 1f,
+        starMult = 1f;
     [Range(1E3F, 1E4F)]
     public float diskTemp = 1E4F;
     public int
@@ -67,6 +68,7 @@ public class ReferenceRayTraceCamera : MonoBehaviour
         RayTracingShader.SetFloat("diskMax", diskMax);
         RayTracingShader.SetFloat("diskTemp", diskTemp);
         RayTracingShader.SetFloat("diskMult", diskMult);
+        RayTracingShader.SetFloat("starMult", starMult);
         RayTracingShader.SetInt("sampleRate", sampleRate);
     }
 

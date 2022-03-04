@@ -20,6 +20,7 @@ float horizonRadius;
 float diskMax;
 float diskTemp;
 float diskMult;
+float starMult;
 int sampleRate;
 
 // Samplers
@@ -60,6 +61,7 @@ Ray CreateCameraRay(float2 uv)
 
     // Invert the perspective projection of the view-space position
     float3 direction = mul(_CameraInverseProjection, float4(uv, 0.0f, 1.0f)).xyz;
+
     // Transform the direction from camera to world space and normalize
     direction = mul(_CameraToWorld, float4(direction, 0.0f)).xyz;
     direction = normalize(direction);
@@ -103,7 +105,6 @@ void IntersectSphere(Ray ray, inout RayHit bestHit, float4 sphere)
         bestHit.distance = t;
         bestHit.position = ray.origin + t * ray.direction;
         bestHit.normal = normalize(bestHit.position - sphere.xyz);
-        //bestHit.color = Blend(bestHit.color, float4(0.0, 0.0, 0.0, 1.0));
         bestHit.color = float4(0.0, 0.0, 0.0, 1.0);
     }
 }
@@ -147,7 +148,8 @@ void IntersectAlignedDisk(Ray ray, inout RayHit bestHit, float r1, float r2)
         // Calculate doppler shift
         float v = sqrt(horizonRadius / (2.0 * r));
         float gamma = 1.0 / sqrt(1.0 - (v * v));
-        float shift = gamma * (1.0 + v * sin(phi));
+        float incidence = ray.direction.x * sin(phi) + ray.direction.z * cos(phi);
+        float shift = gamma * (1.0 + v * incidence);
 
         // Relativistic beaming
         texColor *= pow(abs(shift), 1.5);
@@ -204,7 +206,7 @@ float4 Shade(inout Ray ray, RayHit hit)
         float3 outRay = ray.direction;
         outRay.z *= -1.0;
         float4 texColor = _SkyboxTexture.SampleLevel(sampler_SkyboxTexture, outRay, 0);
-        //return Blend(hit.color, texColor);
+        texColor *= float4(starMult.xxx, 1.0);
         return texColor;
     }
 }

@@ -17,6 +17,7 @@ public class RayTraceCamera : MonoBehaviour
         horizonRadius = 0.5f,
         diskMax = 4f,
         diskMult = 1f,
+        starMult = 1f,
         updateInterval = 1f;
     [Range(1E3F, 1E4F)]
     public float diskTemp = 1E4F;
@@ -122,6 +123,7 @@ public class RayTraceCamera : MonoBehaviour
         rayUpdateShader.SetFloat("horizonRadius", horizonRadius);
         rayUpdateShader.SetFloat("diskMax", diskMax);
         rayUpdateShader.SetFloat("diskMult", diskMult);
+        rayUpdateShader.SetFloat("starMult", starMult);
         rayUpdateShader.SetFloat("diskTemp", diskTemp);
     }
 
