@@ -29,11 +29,18 @@ public class RayTraceCamera : MonoBehaviour
     public float beamExponent = 2f;
 
     [Header("Noise Parameters")]
-    public Vector2 noiseOffset = new Vector2(0f, 0f);
+    public Vector3 noiseOffset = new Vector3(0f, 0f, 0f);
     public float noiseScale = 1f;
     public float noiseCirculation = Mathf.PI / 2f;
     public float noiseH = 1f;
     public int noiseOctaves = 4;
+
+    [Header("Volumetric Cloud Parameters")]
+    public float stepSize = 0.01f;
+    public float absorptionFactor = 0.5f;
+    public float noiseCutoff = 0.5f;
+    public float noiseMultiplier = 1f;
+    public int maxSteps = 20;
 
     [Header("Brightness Modifiers")]
     public float diskMult = 1f;
@@ -131,6 +138,11 @@ public class RayTraceCamera : MonoBehaviour
         rayUpdateShader.SetFloat("noiseCirculation", noiseCirculation);
         rayUpdateShader.SetFloat("noiseH", noiseH);
         rayUpdateShader.SetInt("noiseOctaves", noiseOctaves);
+        rayUpdateShader.SetFloat("stepSize", stepSize);
+        rayUpdateShader.SetFloat("absorptionFactor", absorptionFactor);
+        rayUpdateShader.SetFloat("noiseMultiplier", noiseMultiplier);
+        rayUpdateShader.SetFloat("noiseCutoff", noiseCutoff);
+        rayUpdateShader.SetInt("maxSteps", maxSteps);
         rayUpdateShader.SetFloat("timeStep", timeStep);
         rayUpdateShader.SetFloat("poleMargin", poleMargin);
         rayUpdateShader.SetFloat("poleStep", poleStep);
@@ -155,6 +167,11 @@ public class RayTraceCamera : MonoBehaviour
         simpleRayTracingShader.SetFloat("noiseCirculation", noiseCirculation);
         simpleRayTracingShader.SetFloat("noiseH", noiseH);
         simpleRayTracingShader.SetInt("noiseOctaves", noiseOctaves);
+        simpleRayTracingShader.SetFloat("stepSize", stepSize);
+        simpleRayTracingShader.SetFloat("absorptionFactor", absorptionFactor);
+        simpleRayTracingShader.SetFloat("noiseMultiplier", noiseMultiplier);
+        simpleRayTracingShader.SetFloat("noiseCutoff", noiseCutoff);
+        simpleRayTracingShader.SetInt("maxSteps", maxSteps);
         simpleRayTracingShader.SetFloat("horizonRadius", horizonRadius);
         simpleRayTracingShader.SetFloat("diskMax", diskMax);
         simpleRayTracingShader.SetFloat("diskTemp", diskTemp);
@@ -209,6 +226,9 @@ public class RayTraceCamera : MonoBehaviour
         // Step through ray trace if not complete
         if (!renderComplete) {
             if (startRender) {
+
+                // Read out to console
+                Debug.Log("Beginning render.");
                 
                 // Reset variables
                 startTime = Time.realtimeSinceStartup;

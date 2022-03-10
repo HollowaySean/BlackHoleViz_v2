@@ -248,6 +248,26 @@ bool DiskCheck(float3 x, float3 xLast)
     return true;
 }
 
+// Volumetric rendering of circumstellar disk
+float VolumetricDiskBrightness(float3 x, float3 xLast)
+{
+    // Calculate position along noise
+
+    // Calculate march direction
+
+    // Calculate number of steps through volume
+
+    // Loop through steps, marching through volume
+
+        // Calculate density at next march step
+
+        // Calculate brightness/attenuation if in volume
+
+    // REduce intensity over distance
+
+    return 0.0;
+}
+
 // Get color of accretion disk
 float4 GetDiskColor(float3 x, float3 xLast)
 {
@@ -265,7 +285,7 @@ float4 GetDiskColor(float3 x, float3 xLast)
     float4 texColor = 0.5 * SampleFBM(s * noiseScale + noiseOffset, noiseH, noiseOctaves).xxxx;
 
     // Reduce intensity over distance
-    float falloff = uv.y < 0.0 ? exp(falloffRate*uv.y) : max((1.0 - uv.y), 0.0);
+    float falloff = uv.y < 0.0 ? exp(falloffRate * uv.y * diskMax / horizonRadius) : max((1.0 - uv.y), 0.0);
     texColor *= falloff;
 
     // Calculate temperature

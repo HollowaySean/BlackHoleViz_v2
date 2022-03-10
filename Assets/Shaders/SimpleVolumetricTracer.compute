@@ -1,0 +1,374 @@
+// Each #kernel tells which function to compile; you can have many kernels
+#pragma kernel CSMain
+
+// Constants
+static const float PI = 3.14159265f;
+static const float INF = 3.402823466e+38F;
+
+// Output parameters
+RWTexture2D<float4> Result;
+
+// Input textures
+TextureCube<float4> _SkyboxTexture;
+Texture2D<float3> _BlackbodyTexture;
+
+// Camera matrices
+float4x4 _CameraToWorld;
+float4x4 _CameraInverseProjection;
+
+// Noise parameters
+float3 noiseOffset;
+float noiseScale;
+float noiseCirculation;
+float noiseH;
+int noiseOctaves;
+
+// Volumetric noise parameters
+float stepSize;
+float absorptionFactor;
+float noiseCutoff;
+float noiseMultiplier;
+int maxSteps;
+
+// Physical Parameters
+float horizonRadius;
+float diskMax;
+float diskTemp;
+float falloffRate;
+float beamExponent;
+
+// Brightness parameters
+float diskMult;
+float starMult;
+
+// Renderer parameters
+int sampleRate;
+
+// Samplers
+SamplerState sampler_SkyboxTexture;
+SamplerState sampler_BlackbodyTexture;
+
+// Pseudorandom 2D function
+float Random(float3 sampleCoord)
+{
+    return frac(sin(dot(sampleCoord.xyz, float3(12.9898, 78.233, 49.551))) * 43758.5453123);
+}
+
+// 2D Noise function
+float Noise(float3 sampleCoord) {
+
+    // Separate integral and fractional components
+    float3 i = floor(sampleCoord);
+    float3 fr = frac(sampleCoord);
+
+    // Four corners of adjacent tile
+    float a = Random(i + float3(0.0, 0.0, 0.0));
+    float b = Random(i + float3(1.0, 0.0, 0.0));
+    float c = Random(i + float3(0.0, 1.0, 0.0));
+    float d = Random(i + float3(1.0, 1.0, 0.0));
+    float e = Random(i + float3(0.0, 0.0, 1.0));
+    float f = Random(i + float3(1.0, 0.0, 1.0));
+    float g = Random(i + float3(0.0, 1.0, 1.0));
+    float h = Random(i + float3(1.0, 1.0, 1.0));
+
+    // Smooth interpolation
+    float3 u = fr * fr * (3.0 - 2.0 * fr);
+
+    // Mix and return
+    float z0 = lerp(a, b, u.x) +
+        (c - a) * u.y * (1.0 - u.x) +
+        (d - b) * u.x * u.y;
+    float z1 = lerp(e, f, u.x) +
+        (g - e) * u.y * (1.0 - u.x) +
+        (h - f) * u.x * u.y;
+    return lerp(z0, z1, u.z);
+}
+
+// Fractional Brownian Motion for noise sampling
+float SampleFBM(float3 x, float H, int numOctaves)
+{
+    // Thank you, as always, to Inigo Quilez for this FBM code snippet
+    float G = exp2(-H);
+    float f = 1.0;
+    float a = 1.0;
+    float t = 0.0;
+    for (int i = 0; i < numOctaves; i++)
+    {
+        t += a * Noise(f * x);
+        f *= 2.0;
+        a *= G;
+    }
+    return t;
+}
+
+// Blend transparency and background colors
+float4 Blend(float4 foreColor, float4 backColor)
+{
+    // Blend using previous color's alpha
+    float4 outColor = foreColor + backColor * (1.0 - foreColor.w);
+    return outColor;
+}
+
+// Ray data type
+struct Ray
+{
+    float3 origin;
+    float3 direction;
+};
+
+// Ray constructor
+Ray CreateRay(float3 origin, float3 direction)
+{
+    Ray ray;
+    ray.origin = origin;
+    ray.direction = direction;
+    return ray;
+}
+
+// Create ray using projection matrices
+Ray CreateCameraRay(float2 uv)
+{
+    // Transform the camera origin to world space
+    float3 origin = mul(_CameraToWorld, float4(0.0f, 0.0f, 0.0f, 1.0f)).xyz;
+
+    // Invert the perspective projection of the view-space position
+    float3 direction = mul(_CameraInverseProjection, float4(uv, 0.0f, 1.0f)).xyz;
+
+    // Transform the direction from camera to world space and normalize
+    direction = mul(_CameraToWorld, float4(direction, 0.0f)).xyz;
+    direction = normalize(direction);
+
+    return CreateRay(origin, direction);
+}
+
+// Ray hit data type
+struct RayHit
+{
+    float3 position;
+    float distance;
+    float3 normal;
+    float4 color;
+};
+
+// Ray hit creation method
+RayHit CreateRayHit()
+{
+    RayHit hit;
+    hit.position = float3(0.0, 0.0, 0.0);
+    hit.distance = INF;
+    hit.normal = float3(0.0, 0.0, 0.0);
+    hit.color = float4(0.0, 0.0, 0.0, 0.0);
+    return hit;
+}
+
+// Sphere intersection check
+void IntersectSphere(Ray ray, inout RayHit bestHit, float4 sphere)
+{
+    // Calculate distance along the ray where the sphere is intersected
+    float3 d = ray.origin - sphere.xyz;
+    float p1 = -dot(ray.direction, d);
+    float p2sqr = p1 * p1 - dot(d, d) + sphere.w * sphere.w;
+    if (p2sqr < 0)
+        return;
+    float p2 = sqrt(p2sqr);
+    float t = p1 - p2 > 0 ? p1 - p2 : p1 + p2;
+    if (t > 0 && t < bestHit.distance)
+    {
+        bestHit.distance = t;
+        bestHit.position = ray.origin + t * ray.direction;
+        bestHit.normal = normalize(bestHit.position - sphere.xyz);
+        bestHit.color = float4(0.0, 0.0, 0.0, 1.0);
+    }
+}
+
+// Declarations
+RayHit SecondTrace(Ray ray);
+float4 Shade(inout Ray ray, RayHit hit);
+
+float VolumetricDiskBrightness(Ray ray)
+{
+    // Calculate hit position
+    float t = -ray.origin.y / ray.direction.y;
+    float x = ray.origin.x + ray.direction.x * t;
+    float z = ray.origin.z + ray.direction.z * t;
+    float3 hitPosition = float3(x, 0.0, z);
+
+    // Calculate position parameters
+    float r = length(hitPosition);
+    float phi = atan2(z, x);
+    float rNorm = (r - 3.0 * horizonRadius) / (diskMax - 3.0 * horizonRadius);
+
+    // Calculate starting position 
+    float3 startPos;
+    startPos.x = r * cos(phi + noiseCirculation * rNorm);
+    startPos.y = r * sin(phi + noiseCirculation * rNorm);
+    startPos.z = 0.0;
+    //float3 marchScale = float3(noiseScale, verticalScale, noiseScale);
+
+    // Calculate number of steps through volume
+    int numSteps = int(ceil(1.0 / (stepSize * length(ray.direction.xz))));
+    numSteps = min(maxSteps, numSteps);
+
+    // Loop through steps, marching through volume
+    float volumeDepth = 0.0;
+    float volumetricValue = 0.0;
+    float densitySum = 0.0;
+    for (int i = 0; i < numSteps; i++) {
+
+        // Calculate density at next march step
+        volumeDepth += stepSize;
+        float3 position = startPos + volumeDepth * ray.direction;
+        float density = noiseMultiplier * (SampleFBM(position*noiseScale + noiseOffset, noiseH, noiseOctaves) - noiseCutoff);
+
+        // Calculate brightness/attenuation if in volume
+        bool isInVolume = density > 0.0;
+        if (isInVolume) {
+            densitySum += density;
+            float absorption = exp(-absorptionFactor * densitySum * stepSize);
+            volumetricValue += diskMult * density * stepSize * absorption;
+        }
+    }
+
+    // Reduce intensity over distance
+    float falloff = rNorm < 0.0 ? exp(falloffRate * rNorm * diskMax / horizonRadius) : max((1.0 - rNorm), 0.0);
+    volumetricValue *= falloff;
+
+    return volumetricValue;
+}
+
+// Aligned disk intersection check
+void IntersectAlignedDisk(Ray ray, inout RayHit bestHit, float r1, float r2)
+{
+    // Perform ground plane check
+    float t = -ray.origin.y / ray.direction.y;
+    float x = ray.origin.x + ray.direction.x * t;
+    float z = ray.origin.z + ray.direction.z * t;
+
+    // Check if hit is within disc radius
+    float p = x * x + z * z;
+    if (t > 0 && t < bestHit.distance && p > r1 * r1 && p < r2 * r2)
+    {
+        // Record hit properties
+        bestHit.distance = t;
+        bestHit.position = float3(x, 0.0, z);
+        bestHit.normal = float3(0.0, 1.0, 0.0);
+
+        // Sample noise texture
+        float r = sqrt(p);
+        float phi = atan2(z, -x);
+        float texColor = VolumetricDiskBrightness(ray);
+
+        // Calculate temperature
+        float rFactor = pow(abs(3.0 * horizonRadius / r), 0.75);
+        float T = diskTemp * rFactor;
+
+        // Calculate doppler shift
+        float v = sqrt(horizonRadius / (2.0 * r));
+        float gamma = 1.0 / sqrt(1.0 - (v * v));
+        float incidence = ray.direction.x * sin(phi) + ray.direction.z * cos(phi);
+        float shift = gamma * (1.0 + v * incidence);
+
+        // Relativistic beaming
+        texColor *= pow(abs(shift), beamExponent);
+
+        // Calculate gravitational redshift
+        shift *= sqrt(1 - (horizonRadius / r));
+
+        // Sample blackbody texture
+        float2 uv;
+        uv.x = (shift - 0.5) / (2.0 - 0.5);
+        uv.y = (T - 1000.0) / (10000.0 - 1000.0);
+        float3 bbColor = _BlackbodyTexture.SampleLevel(sampler_BlackbodyTexture, uv, 0);
+
+        // Weight by noise strength and multiplier
+        float4 outColor = texColor.xxxx * float4(bbColor.xyz, 1.0);
+
+        // Cast a new ray, to obtain transparency
+        // A hacky solution, I know, but this is merely the test camera
+        Ray secondRay = CreateRay(bestHit.position, ray.direction);
+        RayHit secondHit = SecondTrace(secondRay);
+
+        // Return alpha blended result
+        //bestHit.color = Blend(outColor, Shade(secondRay, secondHit));
+        bestHit.color = outColor + Shade(secondRay, secondHit);
+    }
+}
+
+// Main ray trace method
+RayHit Trace(Ray ray)
+{
+    RayHit bestHit = CreateRayHit();
+    IntersectAlignedDisk(ray, bestHit, 1.5*horizonRadius, diskMax);
+    IntersectSphere(ray, bestHit, float4(0.0, 0.0, 0.0, horizonRadius));
+    return bestHit;
+}
+
+// Secondary ray trace for transparent disc
+RayHit SecondTrace(Ray ray)
+{
+    RayHit bestHit = CreateRayHit();
+    IntersectSphere(ray, bestHit, float4(0.0, 0.0, 0.0, horizonRadius));
+    return bestHit;
+}
+
+// Shading function
+float4 Shade(inout Ray ray, RayHit hit)
+{
+    if (hit.distance < INF)
+    {
+        // Return color of hit
+        return hit.color;
+    }
+    else
+    {
+        // Return UV sample background
+        float3 outRay = ray.direction;
+        outRay.z *= -1.0;
+        float4 texColor = _SkyboxTexture.SampleLevel(sampler_SkyboxTexture, outRay, 0);
+        texColor *= float4(starMult.xxx, 1.0);
+        return texColor;
+    }
+}
+
+// Main shader loop
+[numthreads(8,8,1)]
+void CSMain(uint3 id : SV_DispatchThreadID) 
+{
+
+    // Set up anti-aliasing offset
+    float2 offset = (sampleRate > 1) ? float2(0.5f, 0.5f) : float2(0.f, 0.f);
+    float angle = radians(360.f / sampleRate);
+    float2x2 rot = float2x2(cos(angle), sin(angle), -sin(angle), cos(angle));
+
+    // Initialize pixel value
+    float4 pixel;
+    float4 averagedPixel = float4(0.0, 0.0, 0.0, 1.0);
+
+    // Get index in global work group i.e x,y position
+    int2 dims;
+    Result.GetDimensions(dims.x, dims.y);
+
+    // Loop over anti-aliasing super-samples
+    for (int aaPass = 0; aaPass < sampleRate; aaPass++)
+    {
+        // Rotate offset
+        offset = mul(rot, offset);
+
+        // Base pixel colour for image
+        float4 pixel = float4(0.0, 0.0, 0.0, 1.0);
+
+        // Generate ray
+        float2 uv = float2((id.xy + float2(0.5f, 0.5f) + offset) / float2(dims.x, dims.y) * 2.0f - 1.0f);
+        Ray ray = CreateCameraRay(uv);
+
+        // Trace ray
+        RayHit hit = Trace(ray);
+        pixel.xyz = Shade(ray, hit).xyz;
+
+        // Average across MSAA samples
+        averagedPixel.xyz += pixel.xyz / float(sampleRate);
+    }
+
+    // Output to a specific pixel in the image
+    Result[id.xy] = float4(averagedPixel.xyz, 1.0);
+}

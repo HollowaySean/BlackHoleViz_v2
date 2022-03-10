@@ -317,7 +317,7 @@ MonoBehaviour:
   m_EditorClassIdentifier: 
   cameraVectorShader: {fileID: 7200000, guid: eff2d974d7c28b547b5fab968065b5ac, type: 3}
   rayUpdateShader: {fileID: 7200000, guid: 803f7e0016463014e9ad9f41a0735930, type: 3}
-  simpleRayTracingShader: {fileID: 7200000, guid: c1ca5e66a97a7a64297a3d7f474f0fd0, type: 3}
+  simpleRayTracingShader: {fileID: 7200000, guid: 40556c5e86fa1e84aaf4ca0762f1f89c, type: 3}
   skyboxTexture: {fileID: 8900000, guid: e8e1bea99525f9a4da79fb1967fb3e11, type: 2}
   BlackbodyTexture: {fileID: 2800000, guid: 6f8d983e2bb4a704d917864debb8b649, type: 3}
   timeStep: 0.01
@@ -327,13 +327,18 @@ MonoBehaviour:
   horizonRadius: 0.5
   diskMax: 3.2
   diskTemp: 6000
-  falloffRate: 10
+  falloffRate: 1.5
   beamExponent: 1.5
-  noiseOffset: {x: 0, y: 0}
-  noiseScale: 1
+  noiseOffset: {x: 0, y: 0, z: 0}
+  noiseScale: 1.5
   noiseCirculation: 1.5707964
-  noiseH: 0.707
+  noiseH: 0.5
   noiseOctaves: 4
+  stepSize: 0.01
+  absorptionFactor: 0
+  noiseCutoff: 0.75
+  noiseMultiplier: 1
+  maxSteps: 1000
   diskMult: 1
   starMult: 1
   updateInterval: 10
@@ -343,7 +348,7 @@ MonoBehaviour:
   saveToFile: 0
   filenamePrefix: test
   saveType: 0
-  cameraState: 0
+  cameraState: 1
 --- !u!45 &963194230
 Skybox:
   m_ObjectHideFlags: 0
