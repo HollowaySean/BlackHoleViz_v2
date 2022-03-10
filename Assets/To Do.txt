@@ -1,11 +1,10 @@
 Improve Accretion Disk:
 - Change to volumetric rendering?
+- Density waves
 
 Cinematic Effect:
 - Implement bloom
 
 Improvements:
 - Generate video frames
-
-Performance:
-- Another attempt at checking escape condition
+- Pass in time parameter

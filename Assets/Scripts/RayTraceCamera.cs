@@ -42,7 +42,8 @@ public class RayTraceCamera : MonoBehaviour
     [Header("Renderer Settings")]
     public float updateInterval = 15f;
     public int overSample = 4;
-    public int maxPasses = 1000;
+    public int maxSoftPasses = 5000;
+    public int maxPasses = 10000;
     public bool saveToFile = false;
     public string filenamePrefix = "";
 
@@ -71,7 +72,8 @@ public class RayTraceCamera : MonoBehaviour
         lastCheck = new Vector2Int(0, 0);
     private bool
         startRender = true,
-        renderComplete = false;
+        renderComplete = false,
+        hardCheck = false;
 
     private void Awake() {
         _camera = GetComponent<Camera>();
@@ -140,6 +142,7 @@ public class RayTraceCamera : MonoBehaviour
         rayUpdateShader.SetFloat("beamExponent", beamExponent);
         rayUpdateShader.SetFloat("diskMult", diskMult);
         rayUpdateShader.SetFloat("starMult", starMult);
+        rayUpdateShader.SetBool("hardCheck", hardCheck);
     }
 
     private void SetSimpleShaderParameters() {
@@ -200,6 +203,7 @@ public class RayTraceCamera : MonoBehaviour
         if (Input.GetKeyDown(KeyCode.Space)) {
             startRender = true;
             renderComplete = false;
+            hardCheck = false;
         }
 
         // Step through ray trace if not complete
@@ -217,10 +221,16 @@ public class RayTraceCamera : MonoBehaviour
                 GenerateCameraVectors();
 
             } else {
-
                 // March rays
                 UpdateRay();
                 currentPass++;
+
+                // Check if hard check pass is surpassed
+                if(!hardCheck && currentPass >= maxSoftPasses) {
+                    hardCheck = true;
+                    Debug.Log("Maximum soft passes exceeded, checking for stranded rays.");
+                    rayUpdateShader.SetBool("hardCheck", true);
+                }
 
                 // Check if maximum passes is surpassed
                 if(currentPass >= maxPasses) {
@@ -297,6 +307,7 @@ public class RayTraceCamera : MonoBehaviour
         for(int i = lastCheck.x; i < _isComplete.width; i++) {
             for(int j = lastCheck.y; j < _isComplete.width; j++) {
                 if(completeTex.GetPixel(i, j).r == 0) {
+                    //Debug.Log("Incomplete on pixel: (" + i.ToString() + ", " + j.ToString() + ")");
                     Destroy(completeTex);
                     lastCheck = new Vector2Int(i, j);
                     return;

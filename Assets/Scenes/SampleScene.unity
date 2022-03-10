@@ -337,7 +337,8 @@ MonoBehaviour:
   diskMult: 1
   starMult: 1
   updateInterval: 10
-  overSample: 8
+  overSample: 1
+  maxSoftPasses: 5000
   maxPasses: 10000
   saveToFile: 0
   filenamePrefix: test

@@ -25,6 +25,7 @@ int noiseOctaves;
 float timeStep;
 float poleMargin;
 float poleStep;
+bool hardCheck;
 
 // Physical parameters
 float escapeDistance;
@@ -187,10 +188,48 @@ float CalculateStepSize(float3 x, float3 u)
 // Check if geodesic inevitably crosses horizon
 bool HorizonCheck(float3 x, float3 u)
 {
-    // Currently just check if inside of photon sphere
-    // Even if geodesic is doomed to collide with horizon, still need to
-    //  check for the accretion disk ahead of it.
-    return abs(x.x) < 1.5 * horizonRadius;
+    // Check if inside of photon sphere
+    if (abs(x.x) < 1.5 * horizonRadius) {
+        return true;
+    }
+
+    // Break here if not doing thorough checking
+    if (!hardCheck) {
+        return false;
+    }
+
+    // Check if stuck near poles
+    if (x.y < poleMargin * PI || (x.y > (1.0 - poleMargin) * PI))
+    {
+        return true;
+    }
+
+    // Check if stuck in orbit
+    if (abs(x.x) < 2.0 * horizonRadius) {
+
+        // Pre-calculate factors
+        float r = x.x;
+        float rs = horizonRadius;
+        float th = x.y;
+        float sth = sin(th);
+        float A = 1.0 - (rs / r);
+        float a = sqrt(A);
+
+        // Calculate motion constants
+        float E = sqrt((A * u.x * u.x) + (u.y * u.y / (r * r)) + (u.z * u.z / (r * r * sth * sth))) / a;
+        float C = u.z * u.z / (E * E);
+
+        // Check if geodesic originates inside of horizon
+        if (C > (27.0 / 4.0) * rs * rs) {
+            return true;
+        }
+        else {
+            return (x.x * u.x < 0.0);
+        }
+    }
+
+    // Otherwise, keep going
+    return false;
 }
 
 // Check if path will cross accretion disk
