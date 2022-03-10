@@ -32,6 +32,7 @@ float horizonRadius;
 float diskMax;
 float diskTemp;
 float falloffRate;
+float beamExponent;
 
 // Brightness parameters
 float diskMult;
@@ -240,7 +241,7 @@ float4 GetDiskColor(float3 x, float3 xLast)
     float shift = gamma * (1.0 + v * incidence);
 
     // Relativistic beaming
-    texColor *= shift * shift;
+    texColor *= pow(abs(shift), beamExponent);
 
     // Calculate gravitational redshift
     shift *= sqrt(1 - (horizonRadius / rEval));

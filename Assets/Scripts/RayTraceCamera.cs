@@ -26,6 +26,7 @@ public class RayTraceCamera : MonoBehaviour
     [Range(1E3F, 1E4F)]
     public float diskTemp = 1E4F;
     public float falloffRate = 10f;
+    public float beamExponent = 2f;
 
     [Header("Noise Parameters")]
     public Vector2 noiseOffset = new Vector2(0f, 0f);
@@ -41,11 +42,12 @@ public class RayTraceCamera : MonoBehaviour
     [Header("Renderer Settings")]
     public float updateInterval = 15f;
     public int overSample = 4;
+    public int maxPasses = 1000;
     public bool saveToFile = false;
     public string filenamePrefix = "";
 
-    public enum SaveType { jpeg, png };
-    public SaveType saveType = SaveType.jpeg;
+    public enum SaveType { JPEG, PNG };
+    public SaveType saveType = SaveType.JPEG;
 
     public enum CameraState { relativistic, simple, unity };
     public CameraState cameraState = CameraState.relativistic;
@@ -60,9 +62,13 @@ public class RayTraceCamera : MonoBehaviour
 
     // Private variables
     private float
-        checkTimer = 0f;
-    private float
+        startTime = 0f,
+        checkTimer = 0f,
         numThreads = 8f;
+    private int
+        currentPass = 0;
+    private Vector2Int
+        lastCheck = new Vector2Int(0, 0);
     private bool
         startRender = true,
         renderComplete = false;
@@ -131,6 +137,7 @@ public class RayTraceCamera : MonoBehaviour
         rayUpdateShader.SetFloat("diskMax", diskMax);
         rayUpdateShader.SetFloat("diskTemp", diskTemp);
         rayUpdateShader.SetFloat("falloffRate", falloffRate);
+        rayUpdateShader.SetFloat("beamExponent", beamExponent);
         rayUpdateShader.SetFloat("diskMult", diskMult);
         rayUpdateShader.SetFloat("starMult", starMult);
     }
@@ -149,6 +156,7 @@ public class RayTraceCamera : MonoBehaviour
         simpleRayTracingShader.SetFloat("diskMax", diskMax);
         simpleRayTracingShader.SetFloat("diskTemp", diskTemp);
         simpleRayTracingShader.SetFloat("falloffRate", falloffRate);
+        simpleRayTracingShader.SetFloat("beamExponent", beamExponent);
         simpleRayTracingShader.SetFloat("diskMult", diskMult);
         simpleRayTracingShader.SetFloat("starMult", starMult);
         simpleRayTracingShader.SetInt("sampleRate", overSample);
@@ -197,11 +205,28 @@ public class RayTraceCamera : MonoBehaviour
         // Step through ray trace if not complete
         if (!renderComplete) {
             if (startRender) {
+                
+                // Reset variables
+                startTime = Time.realtimeSinceStartup;
+                lastCheck = Vector2Int.zero;
+                startRender = false;
+                currentPass = 0;
+
+                // Initialize shaders
                 SetShaderParameters();
                 GenerateCameraVectors();
-                startRender = false;
+
             } else {
+
+                // March rays
                 UpdateRay();
+                currentPass++;
+
+                // Check if maximum passes is surpassed
+                if(currentPass >= maxPasses) {
+                    Debug.Log("Maximum passes exceeded, timing out.");
+                    OnComplete();
+                }
             }
 
             // Check for render completeness once per second
@@ -239,7 +264,6 @@ public class RayTraceCamera : MonoBehaviour
         rayUpdateShader.Dispatch(0, threadGroupsX, threadGroupsY, 1);
     }
 
-
     private void RenderSimple(RenderTexture destination) {
         // Make sure we have a current render target
         InitSimpleRenderTexture();
@@ -270,10 +294,11 @@ public class RayTraceCamera : MonoBehaviour
         Texture2D completeTex = RenderToTexture(_isComplete, TextureFormat.RFloat);
 
         // Loop over pixels searching for incomplete
-        for(int i = 0; i < _isComplete.width; i++) {
-            for(int j = 0; j < _isComplete.width; j++) {
+        for(int i = lastCheck.x; i < _isComplete.width; i++) {
+            for(int j = lastCheck.y; j < _isComplete.width; j++) {
                 if(completeTex.GetPixel(i, j).r == 0) {
                     Destroy(completeTex);
+                    lastCheck = new Vector2Int(i, j);
                     return;
                 }
             }
@@ -281,6 +306,7 @@ public class RayTraceCamera : MonoBehaviour
 
         // Run method if not broken
         Destroy(completeTex);
+        Debug.Log("All pixels rendered successfully.");
         OnComplete();
     }
 
@@ -290,7 +316,8 @@ public class RayTraceCamera : MonoBehaviour
         renderComplete = true;
 
         // Debug message
-        Debug.Log("Render complete!\nTime Elapsed: " + Time.realtimeSinceStartup.ToString());
+        int elapsedTime = (int)(Time.realtimeSinceStartup - startTime);
+        Debug.Log("Render complete!\nTime Elapsed: " + elapsedTime.ToString() + " s");
 
         // Save PNG
         if(saveToFile) { SaveToFile(_color); }
@@ -302,9 +329,19 @@ public class RayTraceCamera : MonoBehaviour
         // Create texture2D from render texture
         Texture2D colorTex = RenderToTexture(saveTexture, TextureFormat.RGBAFloat);
 
-        // Encode to PNG
-        //byte[] bytes = colorTex.EncodeToPNG();
-        byte[] bytes = colorTex.EncodeToJPG();
+        // Encode to image format
+        byte[] bytes;
+        switch (saveType) {
+            case SaveType.JPEG:
+                bytes = colorTex.EncodeToJPG();
+                break;
+            case SaveType.PNG:
+                bytes = colorTex.EncodeToPNG();
+                break;
+            default:
+                bytes = colorTex.EncodeToPNG();
+                break;
+        }
         Destroy(colorTex);
 
         // Save to file
@@ -312,8 +349,14 @@ public class RayTraceCamera : MonoBehaviour
 
             // Set up filename and save
             string filename = string.IsNullOrEmpty(filenamePrefix) ? "" : filenamePrefix + "_";
-            //filename += System.DateTime.Now.ToString("MMddyyyy_hhmmss") + ".png";
-            filename += System.DateTime.Now.ToString("MMddyyyy_hhmmss") + ".jpg";
+            switch (saveType) {
+                case SaveType.JPEG:
+                    filename += System.DateTime.Now.ToString("MMddyyyy_hhmmss") + ".jpg";
+                    break;
+                case SaveType.PNG:
+                    filename += System.DateTime.Now.ToString("MMddyyyy_hhmmss") + ".png";
+                    break;
+            }
             File.WriteAllBytes(Application.dataPath + "/Output/" + filename, bytes);
 
             Debug.Log("File saved.");

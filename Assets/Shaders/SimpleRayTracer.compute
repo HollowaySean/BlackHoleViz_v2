@@ -28,6 +28,7 @@ float horizonRadius;
 float diskMax;
 float diskTemp;
 float falloffRate;
+float beamExponent;
 
 // Brightness parameters
 float diskMult;
@@ -212,7 +213,7 @@ void IntersectAlignedDisk(Ray ray, inout RayHit bestHit, float r1, float r2)
         float shift = gamma * (1.0 + v * incidence);
 
         // Relativistic beaming
-        texColor *= shift * shift;
+        texColor *= pow(abs(shift), beamExponent);
 
         // Calculate gravitational redshift
         shift *= sqrt(1 - (horizonRadius / r));
