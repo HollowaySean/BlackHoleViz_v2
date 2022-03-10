@@ -10,24 +10,35 @@ RWTexture2D<float4> Direction;
 RWTexture2D<float4> Color;
 RWTexture2D<int> isComplete;
 
-// Input parameters
+// Input textures
 TextureCube<float4> _SkyboxTexture;
-Texture2D<float3> _NoiseTexture;
 Texture2D<float3> _BlackbodyTexture;
+
+// Noise parameters
+float2 noiseOffset;
+float noiseScale;
+float noiseCirculation;
+float noiseH;
+int noiseOctaves;
+
+// Step size parameters
 float timeStep;
+float poleMargin;
+float poleStep;
+
+// Physical parameters
 float escapeDistance;
 float horizonRadius;
 float diskMax;
 float diskTemp;
+float falloffRate;
+
+// Brightness parameters
 float diskMult;
 float starMult;
 
 // Samplers
-SamplerState sampler_Position;
-SamplerState sampler_Direction;
-SamplerState sampler_isComplete;
 SamplerState sampler_SkyboxTexture;
-SamplerState sampler_NoiseTexture;
 SamplerState sampler_BlackbodyTexture;
 
 
@@ -87,27 +98,6 @@ float3 ToSphericalScalar(float3 cart)
     return float3(r, theta, phi);
 }
 
-// Cartesian to Spherical vector conversion (inputs in cartesian)
-float3 ToSphericalVector(float3 origin, float3 dir)
-{
-    float r = length(origin);
-    float rxz = length(origin.xz);
-
-    float3x3 L = {
-        origin.x / r,                        // dr/dx
-        origin.y / r,                        // dr/dy
-        origin.z / r,                        // dr/dz
-        origin.x * origin.y / (r * r * rxz), // dtheta/dx
-        -rxz / (r * r),                      // dtheta/dy
-        origin.z* origin.y / (r * r * rxz),  // dtheta/dz
-        -origin.z / rxz,                     // dphi/dx
-        0.0,                                 // dphi/dy
-        origin.x / rxz                       // dphi/dz
-    };
-
-    return mul(L, dir);
-}
-
 // Spherical to Cartesian coordinate conversion
 float3 ToCartesianScalar(float3 sph)
 {
@@ -116,33 +106,6 @@ float3 ToCartesianScalar(float3 sph)
     float z = sph.x * sin(sph.z) * sin(sph.y);
 
     return float3(x, y, z);
-}
-
-// Spherical to Cartesian vector conversion (inputs in spherical)
-float3 ToCartesianVector(float3 origin, float3 dir)
-{
-    float3x3 L = {
-        sin(origin.y) * cos(origin.z),              // dx/dr
-        origin.x * cos(origin.y) * cos(origin.z),   // dx/dtheta
-        -origin.x * sin(origin.y) * sin(origin.z),  // dx/dphi
-        cos(origin.y),                              // dz/dr
-        -origin.x * sin(origin.y),                  // dz/dtheta
-        0.0,                                        // dz/dphi
-        sin(origin.y) * sin(origin.z),              // dy/dr
-        origin.x* cos(origin.y)* sin(origin.z),     // dy/dtheta
-        origin.x* sin(origin.y)* cos(origin.z)      // dy/dphi
-    };
-
-    return mul(L, dir);
-}
-
-// Re-map angles
-void CoordinateChange(inout float3 x, inout float3 u) 
-{
-    // float3 cartU = ToCartesianVector(x, u);
-    float3 cartX = ToCartesianScalar(x);
-    x = ToSphericalScalar(cartX.xzy);
-    // u = ToSphericalVector(cartX.xzy, cartU.xzy);
 }
 
 // Calculate change in k along geodesic affine parameter
@@ -177,12 +140,6 @@ void CalculateGeodesicDerivative(float3 x, float3 u, out float3 dx, out float3 d
 // Runge-Kutta 4th Order integration
 void RK4Step(float tStep, inout float3 x, inout float3 u)
 {
-
-    // If near the north/south poles, change coordinate system
-    float margin = 0.01;
-    bool coordChange = (x.y < margin*PI || x.y > (1.0 - margin)*PI);
-    if(coordChange) { CoordinateChange(x, u); }
-
     // Calculate k-factors
     float3 dx1, du1, dx2, du2, dx3, du3, dx4, du4;
     CalculateGeodesicDerivative(x, u, dx1, du1);
@@ -193,11 +150,6 @@ void RK4Step(float tStep, inout float3 x, inout float3 u)
     // Calculate full update
     x += (tStep / 6.0) * (dx1 + 2.0 * dx2 + 2.0 * dx3 + dx4);
     u += (tStep / 6.0) * (du1 + 2.0 * du2 + 2.0 * du3 + du4);
-
-    // Return to original coordinate system if needed
-    if(coordChange) { CoordinateChange(x, u); }
-
-    return;
 }
 
 // Generate affine parameter step size
@@ -205,61 +157,39 @@ float CalculateStepSize(float3 x, float3 u)
 {
     float rs = horizonRadius;
 
+    // Check if near singular points
+    if (x.y < poleMargin * PI || x.y > (1.0 - poleMargin) * PI)
+    {
+        return poleStep;
+    }
+    
+    // Check if near horizon
     if (abs(x.x) < 2.0 * rs)
     {
         // Near horizon regime
         return timeStep;
     }
+
+    // Check if receding
+    if (u.x * x.x > 0.0)
+    {
+        // Far from horizon, receding
+        return max(timeStep * x.x * x.x, timeStep);
+    }
     else
     {
-        if (u.x * x.x > 0.0)
-        {
-            // Far from horizon, receding
-            return max(timeStep * x.x * x.x, timeStep);
+        // Far from horizon, approaching
+        return max(timeStep * (abs(x.x) - (2.0 * rs)), timeStep);
         }
-        else
-        {
-            // Far from horizon, approaching
-            return max(timeStep * (abs(x.x) - (2.0 * rs)), timeStep);
-        }
-    }
 }
 
 // Check if geodesic inevitably crosses horizon
 bool HorizonCheck(float3 x, float3 u)
 {
-
-    if(abs(x.x) < 1.5 * horizonRadius) {
-        return true;
-    }
-
-    // TO DO: Use constants of motion to check if geodesic can be thrown out at infinity
-
-   // Pre-calculate factors
-   float r = x.x;
-   float rs = horizonRadius;
-   float th = x.y;
-   float sth = sin(th);
-   float A = 1.0 - (rs / r);
-   float a = sqrt(A);
-
-   // Calculate motion constants
-   float Esq = ((A * u.x * u.x) + (u.y * u.y / (r * r)) + (u.z * u.z / (r * r * sth * sth)));
-   float uphi = u.z / (sqrt(Esq) * sth * sth);
-   float L = r * r * uphi;
-   float C = L*L / Esq;
-
-    // Check horizon conditions
-    if (C > 27.0 * rs * rs / 4.0)
-    {
-       return r < 1.5 * horizonRadius;
-    }
-    else
-    {
-       // FIX THIS
-    //    return u.x > 0.0;
-       return false;
-    }
+    // Currently just check if inside of photon sphere
+    // Even if geodesic is doomed to collide with horizon, still need to
+    //  check for the accretion disk ahead of it.
+    return abs(x.x) < 1.5 * horizonRadius;
 }
 
 // Check if path will cross accretion disk
@@ -271,10 +201,8 @@ bool DiskCheck(float3 x, float3 xLast)
     if (newTh * oldTh > 0.0) { return false; }
 
     // Check if within accretion disk bounds
-    // float r_isco = 3.0 * horizonRadius;
-    float r_isco = 1.0 * horizonRadius;
     float r_ave = (x.x + xLast.x) / 2.0;
-    if (r_ave < r_isco || r_ave > diskMax) { return false; }
+    if (r_ave < 1.5 * horizonRadius || r_ave > diskMax) { return false; }
 
     // If passed, return true
     return true;
@@ -291,18 +219,14 @@ float4 GetDiskColor(float3 x, float3 xLast)
     uv.y = (abs(rEval) - 3.0 * horizonRadius) / (diskMax - 3.0 * horizonRadius);
 
     // Sample noise texture
-    // float4 texColor = _NoiseTexture.SampleLevel(sampler_NoiseTexture, uv, 0).xyzx;
     float2 s;
-    float drift = PI/2.0;
-    s.x = rEval*cos(phEval + drift*uv.y);
-    s.y = rEval*sin(phEval + drift*uv.y);
-    float4 texColor = SampleFBM(s, 1.0, 4).xxxx;
-    texColor /= 1.5;
+    s.x = rEval*cos(phEval + noiseCirculation * uv.y);
+    s.y = rEval*sin(phEval + noiseCirculation *uv.y);
+    float4 texColor = 0.5 * SampleFBM(s * noiseScale + noiseOffset, noiseH, noiseOctaves).xxxx;
 
     // Reduce intensity over distance
-    float falloff = uv.y < 0.0 ? exp(10.0*uv.y) : max((1.0 - uv.y), 0.0);
+    float falloff = uv.y < 0.0 ? exp(falloffRate*uv.y) : max((1.0 - uv.y), 0.0);
     texColor *= falloff;
-    // texColor *= max((1.0 - uv.y), 0.0);
 
     // Calculate temperature
     float rFactor = pow(abs(3.0 * horizonRadius / rEval), 0.75);
@@ -337,7 +261,8 @@ float4 GetDiskColor(float3 x, float3 xLast)
 float4 Blend(float4 foreColor, float4 backColor)
 {
     // Blend using previous color's alpha
-    float4 outColor = foreColor + backColor * (1.0 - foreColor.w);
+    //float4 outColor = foreColor + backColor * (1.0 - foreColor.w);
+    float4 outColor = foreColor + backColor;
     return outColor;
 }
 
@@ -363,9 +288,6 @@ void CSMain (uint3 id : SV_DispatchThreadID)
     {
         // Save color from accretion disk noise function
         Color[id.xy] = Blend(Color[id.xy], GetDiskColor(x, xLast));
-
-        // Set complete flag
-        //isComplete[id.xy] = 1;
     }
 
     // Check for horizon condition

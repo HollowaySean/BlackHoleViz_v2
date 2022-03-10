@@ -5,47 +5,60 @@ using UnityEngine;
 
 public class RayTraceCamera : MonoBehaviour
 {
+    [Header("Shaders")]
     public ComputeShader cameraVectorShader;
     public ComputeShader rayUpdateShader;
     public ComputeShader simpleRayTracingShader;
 
+    [Header("Textures")]
     public Cubemap skyboxTexture;
     public Texture BlackbodyTexture;
 
-    public float
-        timeStep = 0.001f,
-        escapeDistance = 10000f,
-        horizonRadius = 0.5f,
-        diskMax = 4f,
-        diskMult = 1f,
-        starMult = 1f,
-        updateInterval = 1f;
+    [Header("Step Size Parameters")]
+    public float timeStep = 0.001f;
+    public float poleMargin = 0.01f;
+    public float poleStep = 0.0001f;
+    public float escapeDistance = 10000f;
+
+    [Header("Physical Parameters")]
+    public float horizonRadius = 0.5f;
+    public float diskMax = 4f;
     [Range(1E3F, 1E4F)]
     public float diskTemp = 1E4F;
-    public int
-        overSample = 4,
-        noiseWidth = 512;
-    public Vector2
-        noiseOrigin = new Vector2(0f, 0f);
-    public Vector3
-        noiseScale = new Vector3(1f, 1f, 1f);
-    public bool
-        liveNoiseUpdate = false,
-        saveToFile = false;
-    public string
-        filenamePrefix = "";
+    public float falloffRate = 10f;
+
+    [Header("Noise Parameters")]
+    public Vector2 noiseOffset = new Vector2(0f, 0f);
+    public float noiseScale = 1f;
+    public float noiseCirculation = Mathf.PI / 2f;
+    public float noiseH = 1f;
+    public int noiseOctaves = 4;
+
+    [Header("Brightness Modifiers")]
+    public float diskMult = 1f;
+    public float starMult = 1f;
+
+    [Header("Renderer Settings")]
+    public float updateInterval = 15f;
+    public int overSample = 4;
+    public bool saveToFile = false;
+    public string filenamePrefix = "";
+
+    public enum SaveType { jpeg, png };
+    public SaveType saveType = SaveType.jpeg;
 
     public enum CameraState { relativistic, simple, unity };
     public CameraState cameraState = CameraState.relativistic;
 
+    // Private objects
     private Camera _camera;
     private RenderTexture _position;
     private RenderTexture _direction;
     private RenderTexture _color;
     private RenderTexture _isComplete;
     private RenderTexture _simpleTarget;
-    private Texture2D _NoiseTexture;
 
+    // Private variables
     private float
         checkTimer = 0f;
     private float
@@ -56,44 +69,7 @@ public class RayTraceCamera : MonoBehaviour
 
     private void Awake() {
         _camera = GetComponent<Camera>();
-        _NoiseTexture = new Texture2D(noiseWidth, noiseWidth);
-        UpdateNoiseTexture();
-        _NoiseTexture.wrapMode = TextureWrapMode.Clamp;
         BlackbodyTexture.wrapMode = TextureWrapMode.Clamp;
-    }
-
-    private void UpdateNoiseTexture() {
-
-        // Create texture object
-        Color[] pix = new Color[noiseWidth * noiseWidth];
-
-        // Loop through pixels and apply noise
-        float nsx = Mathf.Max(noiseScale.x, Mathf.PI * noiseScale.y);
-        float R1 = (nsx / (2f*Mathf.PI)) - (noiseScale.y / 2f);
-        float R2 = (nsx / (2f*Mathf.PI)) + (noiseScale.y / 2f);
-        // Debug.Log(R1 + ", " + R2);
-        float y = 0f;
-        while (y < noiseWidth) {
-            float x = 0f;
-            while (x < noiseWidth) {
-                Vector2 normCoord = new Vector2(x, y) / noiseWidth; 
-                float Psamp = normCoord.x * 2f * Mathf.PI;
-                float Rsamp = normCoord.y * (R2 - R1) + R1;
-                Vector2 sampCoord = (Rsamp * noiseScale.z
-                        * new Vector2(Mathf.Cos(Psamp), Mathf.Sin(Psamp))) 
-                        + noiseOrigin;
-                // if(y == 0f) { Debug.DrawLine(Vector3.zero, new Vector3(sampCoord.x, 0f, sampCoord.y), Color.white);}
-                // if(y == noiseWidth-1f) { Debug.DrawLine(Vector3.zero, new Vector3(sampCoord.x, 0f, sampCoord.y), Color.red);}
-                float sample = Mathf.PerlinNoise(sampCoord.x, sampCoord.y);
-                pix[(int)y * noiseWidth + (int)x] = new Color(sample, sample, sample);
-                x++;
-            }
-            y++;
-        }
-
-        // Send to texture
-        _NoiseTexture.SetPixels(pix);
-        _NoiseTexture.Apply();
     }
 
     private void InitRenderTextures() {
@@ -141,26 +117,38 @@ public class RayTraceCamera : MonoBehaviour
 
         // Send render parameters to update shader
         rayUpdateShader.SetTexture(0, "_SkyboxTexture", skyboxTexture);
-        rayUpdateShader.SetTexture(0, "_NoiseTexture", _NoiseTexture);
         rayUpdateShader.SetTexture(0, "_BlackbodyTexture", BlackbodyTexture);
+        rayUpdateShader.SetVector("noiseOffset", noiseOffset);
+        rayUpdateShader.SetFloat("noiseScale", noiseScale);
+        rayUpdateShader.SetFloat("noiseCirculation", noiseCirculation);
+        rayUpdateShader.SetFloat("noiseH", noiseH);
+        rayUpdateShader.SetInt("noiseOctaves", noiseOctaves);
         rayUpdateShader.SetFloat("timeStep", timeStep);
+        rayUpdateShader.SetFloat("poleMargin", poleMargin);
+        rayUpdateShader.SetFloat("poleStep", poleStep);
         rayUpdateShader.SetFloat("escapeDistance", escapeDistance);
         rayUpdateShader.SetFloat("horizonRadius", horizonRadius);
         rayUpdateShader.SetFloat("diskMax", diskMax);
+        rayUpdateShader.SetFloat("diskTemp", diskTemp);
+        rayUpdateShader.SetFloat("falloffRate", falloffRate);
         rayUpdateShader.SetFloat("diskMult", diskMult);
         rayUpdateShader.SetFloat("starMult", starMult);
-        rayUpdateShader.SetFloat("diskTemp", diskTemp);
     }
 
     private void SetSimpleShaderParameters() {
         simpleRayTracingShader.SetMatrix("_CameraToWorld", _camera.cameraToWorldMatrix);
         simpleRayTracingShader.SetMatrix("_CameraInverseProjection", _camera.projectionMatrix.inverse);
         simpleRayTracingShader.SetTexture(0, "_SkyboxTexture", skyboxTexture);
-        simpleRayTracingShader.SetTexture(0, "_NoiseTexture", _NoiseTexture);
         simpleRayTracingShader.SetTexture(0, "_BlackbodyTexture", BlackbodyTexture);
+        simpleRayTracingShader.SetVector("noiseOffset", noiseOffset);
+        simpleRayTracingShader.SetFloat("noiseScale", noiseScale);
+        simpleRayTracingShader.SetFloat("noiseCirculation", noiseCirculation);
+        simpleRayTracingShader.SetFloat("noiseH", noiseH);
+        simpleRayTracingShader.SetInt("noiseOctaves", noiseOctaves);
         simpleRayTracingShader.SetFloat("horizonRadius", horizonRadius);
         simpleRayTracingShader.SetFloat("diskMax", diskMax);
         simpleRayTracingShader.SetFloat("diskTemp", diskTemp);
+        simpleRayTracingShader.SetFloat("falloffRate", falloffRate);
         simpleRayTracingShader.SetFloat("diskMult", diskMult);
         simpleRayTracingShader.SetFloat("starMult", starMult);
         simpleRayTracingShader.SetInt("sampleRate", overSample);
@@ -190,15 +178,14 @@ public class RayTraceCamera : MonoBehaviour
             return;
         }
 
+        // Skip if using simple renderer
+        if (cameraState == CameraState.simple) {
+            return;
+        }
+
         // Manually save on S key
         if (Input.GetKeyDown(KeyCode.S)) {
             SaveToFile(cameraState == CameraState.relativistic ? _color : _simpleTarget);
-        }
-
-        // Update noise and skip if using simple renderer
-        if(cameraState == CameraState.simple) {
-            if (liveNoiseUpdate) { UpdateNoiseTexture(); }
-            return;
         }
 
         // Restart render on spacebar
@@ -210,7 +197,6 @@ public class RayTraceCamera : MonoBehaviour
         // Step through ray trace if not complete
         if (!renderComplete) {
             if (startRender) {
-                UpdateNoiseTexture();
                 SetShaderParameters();
                 GenerateCameraVectors();
                 startRender = false;

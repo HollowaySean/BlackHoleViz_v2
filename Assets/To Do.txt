@@ -1,21 +1,17 @@
 Improve Accretion Disk:
-- Improve look of texture
-- Improve alpha blending
+- Change to volumetric rendering?
+- Correct beaming exponent?
+	- Maybe parameterize?
 
-Parameterization:
-- Noise scale
-- Noise offset
-- Noise circulation
-- Falloff
-- Coordinate change limit
+Update Simple to match Relativistic
 
 Cinematic Effect:
 - Implement bloom
 
 Performance:
-- Fix problem at theta in {0, pi}
 - Improve completeness condition
-	- Fix motion constants check?
+	- Set max time/steps
+	- Placeholder for completeness texture
 
 Improvements:
 - Generate video frames
