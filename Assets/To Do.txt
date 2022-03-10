@@ -1,10 +1,21 @@
 Improve Accretion Disk:
-- Correct periodicity at phi = +/-pi
 - Improve look of texture
+- Improve alpha blending
+
+Parameterization:
+- Noise scale
+- Noise offset
+- Noise circulation
+- Falloff
+- Coordinate change limit
 
 Cinematic Effect:
 - Implement bloom
 
 Performance:
+- Fix problem at theta in {0, pi}
 - Improve completeness condition
 	- Fix motion constants check?
+
+Improvements:
+- Generate video frames

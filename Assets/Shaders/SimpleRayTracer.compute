@@ -28,6 +28,50 @@ SamplerState sampler_SkyboxTexture;
 SamplerState sampler_NoiseTexture;
 SamplerState sampler_BlackbodyTexture;
 
+// Pseudorandom 2D function
+float Random(float2 sampleCoord)
+{
+    return frac(sin(dot(sampleCoord.xy, float2(12.9898,78.233)))*43758.5453123);
+}
+
+// 2D Noise function
+float Noise(float2 sampleCoord) {
+
+    // Separate integral and fractional components
+    float2 i = floor(sampleCoord);
+    float2 f = frac(sampleCoord);
+
+    // Four corners of adjacent tile
+    float a = Random(i);
+    float b = Random(i + float2(1.0, 0.0));
+    float c = Random(i + float2(0.0, 1.0));
+    float d = Random(i + float2(1.0, 1.0));
+
+    // Smooth interpolation
+    float2 u = f*f*(3.0-2.0*f);
+
+    // Mix and return
+    return lerp(a, b, u.x) + 
+            (c - a) * u.y * (1.0 - u.x) +
+            (d - b) * u.x * u.y;
+}
+
+// Fractional Brownian Motion for noise sampling
+float SampleFBM(float2 x, float H, int numOctaves)
+{
+    // Thank you, as always, to Inigo Quilez for this FBM code snippet
+    float G = exp2(-H);
+    float f = 1.0;
+    float a = 1.0;
+    float t = 0.0;
+    for( int i=0; i<numOctaves; i++ )
+    {
+        t += a*Noise(f*x);
+        f *= 2.0;
+        a *= G;
+    }
+    return t;
+}
 
 // Blend transparency and background colors
 float4 Blend(float4 foreColor, float4 backColor)
@@ -134,12 +178,18 @@ void IntersectAlignedDisk(Ray ray, inout RayHit bestHit, float r1, float r2)
         float r = sqrt(p);
         float phi = atan2(z, -x);
         float2 uv;
-        uv.x = (r - r1) / (r2 - r1);
-        uv.y = ((atan2(z, -x) / (2.0 * PI)) + 0.5);
-        float texColor = _NoiseTexture.SampleLevel(sampler_NoiseTexture, uv, 0).x;
+        uv.x = ((atan2(z, -x) / (2.0 * PI)) + 0.5);
+        uv.y = (r - r1) / (r2 - r1);
+        // uv.y = (r - 0.0) / (r2 - 0.0);
+        // float texColor = _NoiseTexture.SampleLevel(sampler_NoiseTexture, uv, 0).x;
+        float2 s;
+        s.x = r*cos(phi);
+        s.y = r*sin(phi);
+        // NOTE: CLEAN UP, PASS IN SCALE FROM C#
+        float texColor = SampleFBM(s*4, 0.75, 4);
 
         // Reduce intensity over distance
-        texColor *= max((1.0 - uv.x), 0.0);
+        texColor *= max((1.0 - uv.y), 0.0);
 
         // Calculate temperature
         float rFactor = pow(abs(r1 / r), 0.75);

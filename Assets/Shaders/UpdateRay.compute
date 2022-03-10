@@ -30,6 +30,121 @@ SamplerState sampler_SkyboxTexture;
 SamplerState sampler_NoiseTexture;
 SamplerState sampler_BlackbodyTexture;
 
+
+// Pseudorandom 2D function
+float Random(float2 sampleCoord)
+{
+    return frac(sin(dot(sampleCoord.xy, float2(12.9898,78.233)))*43758.5453123);
+}
+
+// 2D Noise function
+float Noise(float2 sampleCoord) {
+
+    // Separate integral and fractional components
+    float2 i = floor(sampleCoord);
+    float2 f = frac(sampleCoord);
+
+    // Four corners of adjacent tile
+    float a = Random(i);
+    float b = Random(i + float2(1.0, 0.0));
+    float c = Random(i + float2(0.0, 1.0));
+    float d = Random(i + float2(1.0, 1.0));
+
+    // Smooth interpolation
+    float2 u = f*f*(3.0-2.0*f);
+
+    // Mix and return
+    return lerp(a, b, u.x) + 
+            (c - a) * u.y * (1.0 - u.x) +
+            (d - b) * u.x * u.y;
+}
+
+// Fractional Brownian Motion for noise sampling
+float SampleFBM(float2 x, float H, int numOctaves)
+{
+    // Thank you, as always, to Inigo Quilez for this FBM code snippet
+    float G = exp2(-H);
+    float f = 1.0;
+    float a = 1.0;
+    float t = 0.0;
+    for( int i=0; i<numOctaves; i++ )
+    {
+        t += a*Noise(f*x);
+        f *= 2.0;
+        a *= G;
+    }
+    return t;
+}
+
+// Cartesian to Spherical coordinate conversion
+float3 ToSphericalScalar(float3 cart)
+{
+    float r = length(cart);
+    float rxz = length(cart.xz);
+    float theta = atan2(rxz, cart.y);
+    float phi = atan2(cart.z, cart.x);
+
+    return float3(r, theta, phi);
+}
+
+// Cartesian to Spherical vector conversion (inputs in cartesian)
+float3 ToSphericalVector(float3 origin, float3 dir)
+{
+    float r = length(origin);
+    float rxz = length(origin.xz);
+
+    float3x3 L = {
+        origin.x / r,                        // dr/dx
+        origin.y / r,                        // dr/dy
+        origin.z / r,                        // dr/dz
+        origin.x * origin.y / (r * r * rxz), // dtheta/dx
+        -rxz / (r * r),                      // dtheta/dy
+        origin.z* origin.y / (r * r * rxz),  // dtheta/dz
+        -origin.z / rxz,                     // dphi/dx
+        0.0,                                 // dphi/dy
+        origin.x / rxz                       // dphi/dz
+    };
+
+    return mul(L, dir);
+}
+
+// Spherical to Cartesian coordinate conversion
+float3 ToCartesianScalar(float3 sph)
+{
+    float x = sph.x * cos(sph.z) * sin(sph.y);
+    float y = sph.x * cos(sph.y);
+    float z = sph.x * sin(sph.z) * sin(sph.y);
+
+    return float3(x, y, z);
+}
+
+// Spherical to Cartesian vector conversion (inputs in spherical)
+float3 ToCartesianVector(float3 origin, float3 dir)
+{
+    float3x3 L = {
+        sin(origin.y) * cos(origin.z),              // dx/dr
+        origin.x * cos(origin.y) * cos(origin.z),   // dx/dtheta
+        -origin.x * sin(origin.y) * sin(origin.z),  // dx/dphi
+        cos(origin.y),                              // dz/dr
+        -origin.x * sin(origin.y),                  // dz/dtheta
+        0.0,                                        // dz/dphi
+        sin(origin.y) * sin(origin.z),              // dy/dr
+        origin.x* cos(origin.y)* sin(origin.z),     // dy/dtheta
+        origin.x* sin(origin.y)* cos(origin.z)      // dy/dphi
+    };
+
+    return mul(L, dir);
+}
+
+// Re-map angles
+void CoordinateChange(inout float3 x, inout float3 u) 
+{
+    // float3 cartU = ToCartesianVector(x, u);
+    float3 cartX = ToCartesianScalar(x);
+    x = ToSphericalScalar(cartX.xzy);
+    // u = ToSphericalVector(cartX.xzy, cartU.xzy);
+}
+
 // Calculate change in k along geodesic affine parameter
 void CalculateGeodesicDerivative(float3 x, float3 u, out float3 dx, out float3 du)
 {
@@ -63,6 +178,11 @@ void CalculateGeodesicDerivative(float3 x, float3 u, out float3 dx, out float3 d
 void RK4Step(float tStep, inout float3 x, inout float3 u)
 {
 
+    // If near the north/south poles, change coordinate system
+    float margin = 0.01;
+    bool coordChange = (x.y < margin*PI || x.y > (1.0 - margin)*PI);
+    if(coordChange) { CoordinateChange(x, u); }
+
     // Calculate k-factors
     float3 dx1, du1, dx2, du2, dx3, du3, dx4, du4;
     CalculateGeodesicDerivative(x, u, dx1, du1);
@@ -74,18 +194,10 @@ void RK4Step(float tStep, inout float3 x, inout float3 u)
     x += (tStep / 6.0) * (dx1 + 2.0 * dx2 + 2.0 * dx3 + dx4);
     u += (tStep / 6.0) * (du1 + 2.0 * du2 + 2.0 * du3 + du4);
 
+    // Return to original coordinate system if needed
+    if(coordChange) { CoordinateChange(x, u); }
+
     return;
-}
-
-// Spherical to Cartesian coordinate conversion
-float3 ToCartesianScalar(float3 sph)
-{
-    float3 cart;
-    cart.x = sph.x * cos(sph.z) * sin(sph.y);
-    cart.y = sph.x * cos(sph.y);
-    cart.z = sph.x * sin(sph.z) * sin(sph.y);
-
-    return cart;
 }
 
 // Generate affine parameter step size
@@ -117,34 +229,37 @@ float CalculateStepSize(float3 x, float3 u)
 bool HorizonCheck(float3 x, float3 u)
 {
 
-    return abs(x.x) < 1.5 * horizonRadius;
+    if(abs(x.x) < 1.5 * horizonRadius) {
+        return true;
+    }
 
     // TO DO: Use constants of motion to check if geodesic can be thrown out at infinity
 
-//    // Pre-calculate factors
-//    float r = x.x;
-//    float rs = horizonRadius;
-//    float th = x.y;
-//    float sth = sin(th);
-//    float A = 1.0 - (rs / r);
-//    float a = sqrt(A);
-//
-//    // Calculate motion constants
-//    float Esq = ((A * u.x * u.x) + (u.y * u.y / (r * r)) + (u.z * u.z / (r * r * sth * sth)));
-//    float Lsq = (r * r * r * r) * (u.y * u.y + sth * sth * u.z * u.z);
-//    float C = Lsq / Esq;
+   // Pre-calculate factors
+   float r = x.x;
+   float rs = horizonRadius;
+   float th = x.y;
+   float sth = sin(th);
+   float A = 1.0 - (rs / r);
+   float a = sqrt(A);
 
-    //// Check horizon conditions
-    //if (C > 27.0 * rs * rs / 4.0)
-    //{
-    //    return r < 1.5 * horizonRadius;
-    //}
-    //else
-    //{
-    //    // FIX THIS
-    //    //return u.x > 0.0;
-    //    return false;
-    //}
+   // Calculate motion constants
+   float Esq = ((A * u.x * u.x) + (u.y * u.y / (r * r)) + (u.z * u.z / (r * r * sth * sth)));
+   float uphi = u.z / (sqrt(Esq) * sth * sth);
+   float L = r * r * uphi;
+   float C = L*L / Esq;
+
+    // Check horizon conditions
+    if (C > 27.0 * rs * rs / 4.0)
+    {
+       return r < 1.5 * horizonRadius;
+    }
+    else
+    {
+       // FIX THIS
+    //    return u.x > 0.0;
+       return false;
+    }
 }
 
 // Check if path will cross accretion disk
@@ -156,7 +271,8 @@ bool DiskCheck(float3 x, float3 xLast)
     if (newTh * oldTh > 0.0) { return false; }
 
     // Check if within accretion disk bounds
-    float r_isco = 3.0 * horizonRadius;
+    // float r_isco = 3.0 * horizonRadius;
+    float r_isco = 1.0 * horizonRadius;
     float r_ave = (x.x + xLast.x) / 2.0;
     if (r_ave < r_isco || r_ave > diskMax) { return false; }
 
@@ -171,14 +287,22 @@ float4 GetDiskColor(float3 x, float3 xLast)
     float2 uv;
     float rEval = (x.x + xLast.x) / 2.0;
     float phEval = (x.z + xLast.z) / 2.0;
-    uv.x = (abs(rEval) - 3.0 * horizonRadius) / (diskMax - 3.0 * horizonRadius);
-    uv.y = phEval / (2.0 * PI);
+    uv.x = phEval / (2.0 * PI);
+    uv.y = (abs(rEval) - 3.0 * horizonRadius) / (diskMax - 3.0 * horizonRadius);
 
     // Sample noise texture
-    float4 texColor = _NoiseTexture.SampleLevel(sampler_NoiseTexture, uv, 0).xyzx;
+    // float4 texColor = _NoiseTexture.SampleLevel(sampler_NoiseTexture, uv, 0).xyzx;
+    float2 s;
+    float drift = PI/2.0;
+    s.x = rEval*cos(phEval + drift*uv.y);
+    s.y = rEval*sin(phEval + drift*uv.y);
+    float4 texColor = SampleFBM(s, 1.0, 4).xxxx;
+    texColor /= 1.5;
 
     // Reduce intensity over distance
-    texColor *= max((1.0 - uv.x), 0.0);
+    float falloff = uv.y < 0.0 ? exp(10.0*uv.y) : max((1.0 - uv.y), 0.0);
+    texColor *= falloff;
+    // texColor *= max((1.0 - uv.y), 0.0);
 
     // Calculate temperature
     float rFactor = pow(abs(3.0 * horizonRadius / rEval), 0.75);

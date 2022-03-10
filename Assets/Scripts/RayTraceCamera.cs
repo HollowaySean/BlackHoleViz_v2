@@ -23,11 +23,12 @@ public class RayTraceCamera : MonoBehaviour
     [Range(1E3F, 1E4F)]
     public float diskTemp = 1E4F;
     public int
-        scaleFactor = 4,
+        overSample = 4,
         noiseWidth = 512;
     public Vector2
-        noiseOrigin = new Vector2(0f, 0f),
-        noiseScale = new Vector2(1f, 1f);
+        noiseOrigin = new Vector2(0f, 0f);
+    public Vector3
+        noiseScale = new Vector3(1f, 1f, 1f);
     public bool
         liveNoiseUpdate = false,
         saveToFile = false;
@@ -67,13 +68,23 @@ public class RayTraceCamera : MonoBehaviour
         Color[] pix = new Color[noiseWidth * noiseWidth];
 
         // Loop through pixels and apply noise
+        float nsx = Mathf.Max(noiseScale.x, Mathf.PI * noiseScale.y);
+        float R1 = (nsx / (2f*Mathf.PI)) - (noiseScale.y / 2f);
+        float R2 = (nsx / (2f*Mathf.PI)) + (noiseScale.y / 2f);
+        // Debug.Log(R1 + ", " + R2);
         float y = 0f;
         while (y < noiseWidth) {
             float x = 0f;
             while (x < noiseWidth) {
-                float xCoord = noiseOrigin.x + (x * noiseScale.x) / noiseWidth;
-                float yCoord = noiseOrigin.y + (y * noiseScale.y) / noiseWidth;
-                float sample = Mathf.PerlinNoise(xCoord, yCoord);
+                Vector2 normCoord = new Vector2(x, y) / noiseWidth; 
+                float Psamp = normCoord.x * 2f * Mathf.PI;
+                float Rsamp = normCoord.y * (R2 - R1) + R1;
+                Vector2 sampCoord = (Rsamp * noiseScale.z
+                        * new Vector2(Mathf.Cos(Psamp), Mathf.Sin(Psamp))) 
+                        + noiseOrigin;
+                // if(y == 0f) { Debug.DrawLine(Vector3.zero, new Vector3(sampCoord.x, 0f, sampCoord.y), Color.white);}
+                // if(y == noiseWidth-1f) { Debug.DrawLine(Vector3.zero, new Vector3(sampCoord.x, 0f, sampCoord.y), Color.red);}
+                float sample = Mathf.PerlinNoise(sampCoord.x, sampCoord.y);
                 pix[(int)y * noiseWidth + (int)x] = new Color(sample, sample, sample);
                 x++;
             }
@@ -87,26 +98,26 @@ public class RayTraceCamera : MonoBehaviour
 
     private void InitRenderTextures() {
 
-        SetupTexture(ref _position,     RenderTextureFormat.ARGBFloat);
-        SetupTexture(ref _direction,    RenderTextureFormat.ARGBFloat);
-        SetupTexture(ref _color,        RenderTextureFormat.ARGBFloat);
-        SetupTexture(ref _isComplete,   RenderTextureFormat.RInt);
+        SetupTexture(ref _position,     RenderTextureFormat.ARGBFloat,  overSample * Screen.width, overSample * Screen.height);
+        SetupTexture(ref _direction,    RenderTextureFormat.ARGBFloat,  overSample * Screen.width, overSample * Screen.height);
+        SetupTexture(ref _color,        RenderTextureFormat.ARGBFloat,  overSample * Screen.width, overSample * Screen.height);
+        SetupTexture(ref _isComplete,   RenderTextureFormat.RInt,       overSample * Screen.width, overSample * Screen.height);
     }
 
     private void InitSimpleRenderTexture() {
 
-        SetupTexture(ref _simpleTarget, RenderTextureFormat.ARGBFloat);
+        SetupTexture(ref _simpleTarget, RenderTextureFormat.ARGBFloat, Screen.width, Screen.height);
     }
 
-    private void SetupTexture(ref RenderTexture texture, RenderTextureFormat format) {
+    private void SetupTexture(ref RenderTexture texture, RenderTextureFormat format, int width, int height) {
 
-        if (texture == null || texture.width != scaleFactor * Screen.width || texture.height != scaleFactor * Screen.height) {
+        if (texture == null || texture.width !=  width || texture.height != height) {
             // Release render texture if we already have one
             if (texture != null)
                 texture.Release();
 
             // Get a render target for Ray Tracing
-            texture = new RenderTexture(scaleFactor * Screen.width, scaleFactor * Screen.height, 0,
+            texture = new RenderTexture(width, height, 0,
                 format, RenderTextureReadWrite.Linear);
             texture.enableRandomWrite = true;
             texture.Create();
@@ -152,7 +163,7 @@ public class RayTraceCamera : MonoBehaviour
         simpleRayTracingShader.SetFloat("diskTemp", diskTemp);
         simpleRayTracingShader.SetFloat("diskMult", diskMult);
         simpleRayTracingShader.SetFloat("starMult", starMult);
-        simpleRayTracingShader.SetInt("sampleRate", scaleFactor);
+        simpleRayTracingShader.SetInt("sampleRate", overSample);
     }
 
     private void OnRenderImage(RenderTexture source, RenderTexture destination) {
@@ -225,8 +236,8 @@ public class RayTraceCamera : MonoBehaviour
         cameraVectorShader.SetTexture(0, "Direction", _direction);
         cameraVectorShader.SetTexture(0, "Color", _color);
         cameraVectorShader.SetTexture(0, "isComplete", _isComplete);
-        int threadGroupsX = Mathf.CeilToInt(scaleFactor * Screen.width / numThreads);
-        int threadGroupsY = Mathf.CeilToInt(scaleFactor * Screen.height / numThreads);
+        int threadGroupsX = Mathf.CeilToInt(overSample * Screen.width / numThreads);
+        int threadGroupsY = Mathf.CeilToInt(overSample * Screen.height / numThreads);
         cameraVectorShader.Dispatch(0, threadGroupsX, threadGroupsY, 1);
     }
 
@@ -237,8 +248,8 @@ public class RayTraceCamera : MonoBehaviour
         rayUpdateShader.SetTexture(0, "Direction", _direction);
         rayUpdateShader.SetTexture(0, "Color", _color);
         rayUpdateShader.SetTexture(0, "isComplete", _isComplete);
-        int threadGroupsX = Mathf.CeilToInt(scaleFactor * Screen.width / numThreads);
-        int threadGroupsY = Mathf.CeilToInt(scaleFactor * Screen.height / numThreads);
+        int threadGroupsX = Mathf.CeilToInt(overSample * Screen.width / numThreads);
+        int threadGroupsY = Mathf.CeilToInt(overSample * Screen.height / numThreads);
         rayUpdateShader.Dispatch(0, threadGroupsX, threadGroupsY, 1);
     }
 
