@@ -1,5 +1,5 @@
 Improve Accretion Disk:
-- Change to volumetric rendering?
+- Volumetric rendering
 - Density waves
 
 Cinematic Effect:

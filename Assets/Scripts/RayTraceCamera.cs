@@ -330,7 +330,7 @@ public class RayTraceCamera : MonoBehaviour
         int elapsedTime = (int)(Time.realtimeSinceStartup - startTime);
         Debug.Log("Render complete!\nTime Elapsed: " + elapsedTime.ToString() + " s");
 
-        // Save PNG
+        // Save image file
         if(saveToFile) { SaveToFile(_color); }
 
     }
