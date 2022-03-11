@@ -1,5 +1,4 @@
 Improve Accretion Disk:
-- Volumetric rendering
 - Density waves
 - Stefan-boltzmann factor
 

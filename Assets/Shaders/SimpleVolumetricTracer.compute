@@ -48,13 +48,13 @@ int sampleRate;
 SamplerState sampler_SkyboxTexture;
 SamplerState sampler_BlackbodyTexture;
 
-// Pseudorandom 2D function
+// Pseudorandom 3D function
 float Random(float3 sampleCoord)
 {
     return frac(sin(dot(sampleCoord.xyz, float3(12.9898, 78.233, 49.551))) * 43758.5453123);
 }
 
-// 2D Noise function
+// 3D Noise function
 float Noise(float3 sampleCoord) {
 
     // Separate integral and fractional components
@@ -231,6 +231,7 @@ float VolumetricDiskBrightness(Ray ray)
 
     // Reduce intensity over distance
     float falloff = rNorm < 0.0 ? exp(falloffRate * rNorm * diskMax / horizonRadius) : max((1.0 - rNorm), 0.0);
+    //float falloff = rNorm < 0.0 ? exp(falloffRate * rNorm * diskMax / horizonRadius) : 1.0;
     volumetricValue *= falloff;
 
     return volumetricValue;
@@ -282,6 +283,9 @@ void IntersectAlignedDisk(Ray ray, inout RayHit bestHit, float r1, float r2)
 
         // Weight by noise strength and multiplier
         float4 outColor = texColor.xxxx * float4(bbColor.xyz, 1.0);
+
+        // Weight by Stefan-Boltzmann curve
+        outColor *= pow(abs(T / diskTemp), 4);
 
         // Cast a new ray, to obtain transparency
         // A hacky solution, I know, but this is merely the test camera

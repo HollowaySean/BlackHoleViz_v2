@@ -15,11 +15,18 @@ TextureCube<float4> _SkyboxTexture;
 Texture2D<float3> _BlackbodyTexture;
 
 // Noise parameters
-float2 noiseOffset;
+float3 noiseOffset;
 float noiseScale;
 float noiseCirculation;
 float noiseH;
 int noiseOctaves;
+
+// Volumetric noise parameters
+float stepSize;
+float absorptionFactor;
+float noiseCutoff;
+float noiseMultiplier;
+int maxSteps;
 
 // Step size parameters
 float timeStep;
@@ -44,60 +51,57 @@ SamplerState sampler_SkyboxTexture;
 SamplerState sampler_BlackbodyTexture;
 
 
-// Pseudorandom 2D function
-float Random(float2 sampleCoord)
+// Pseudorandom 3D function
+float Random(float3 sampleCoord)
 {
-    return frac(sin(dot(sampleCoord.xy, float2(12.9898,78.233)))*43758.5453123);
+    return frac(sin(dot(sampleCoord.xyz, float3(12.9898, 78.233, 49.551))) * 43758.5453123);
 }
 
-// 2D Noise function
-float Noise(float2 sampleCoord) {
+// 3D Noise function
+float Noise(float3 sampleCoord) {
 
     // Separate integral and fractional components
-    float2 i = floor(sampleCoord);
-    float2 f = frac(sampleCoord);
+    float3 i = floor(sampleCoord);
+    float3 fr = frac(sampleCoord);
 
     // Four corners of adjacent tile
-    float a = Random(i);
-    float b = Random(i + float2(1.0, 0.0));
-    float c = Random(i + float2(0.0, 1.0));
-    float d = Random(i + float2(1.0, 1.0));
+    float a = Random(i + float3(0.0, 0.0, 0.0));
+    float b = Random(i + float3(1.0, 0.0, 0.0));
+    float c = Random(i + float3(0.0, 1.0, 0.0));
+    float d = Random(i + float3(1.0, 1.0, 0.0));
+    float e = Random(i + float3(0.0, 0.0, 1.0));
+    float f = Random(i + float3(1.0, 0.0, 1.0));
+    float g = Random(i + float3(0.0, 1.0, 1.0));
+    float h = Random(i + float3(1.0, 1.0, 1.0));
 
     // Smooth interpolation
-    float2 u = f*f*(3.0-2.0*f);
+    float3 u = fr * fr * (3.0 - 2.0 * fr);
 
     // Mix and return
-    return lerp(a, b, u.x) + 
-            (c - a) * u.y * (1.0 - u.x) +
-            (d - b) * u.x * u.y;
+    float z0 = lerp(a, b, u.x) +
+        (c - a) * u.y * (1.0 - u.x) +
+        (d - b) * u.x * u.y;
+    float z1 = lerp(e, f, u.x) +
+        (g - e) * u.y * (1.0 - u.x) +
+        (h - f) * u.x * u.y;
+    return lerp(z0, z1, u.z);
 }
 
 // Fractional Brownian Motion for noise sampling
-float SampleFBM(float2 x, float H, int numOctaves)
+float SampleFBM(float3 x, float H, int numOctaves)
 {
     // Thank you, as always, to Inigo Quilez for this FBM code snippet
     float G = exp2(-H);
     float f = 1.0;
     float a = 1.0;
     float t = 0.0;
-    for( int i=0; i<numOctaves; i++ )
+    for (int i = 0; i < numOctaves; i++)
     {
-        t += a*Noise(f*x);
+        t += a * Noise(f * x);
         f *= 2.0;
         a *= G;
     }
     return t;
-}
-
-// Cartesian to Spherical coordinate conversion
-float3 ToSphericalScalar(float3 cart)
-{
-    float r = length(cart);
-    float rxz = length(cart.xz);
-    float theta = atan2(rxz, cart.y);
-    float phi = atan2(cart.z, cart.x);
-
-    return float3(r, theta, phi);
 }
 
 // Spherical to Cartesian coordinate conversion
@@ -251,21 +255,49 @@ bool DiskCheck(float3 x, float3 xLast)
 // Volumetric rendering of circumstellar disk
 float VolumetricDiskBrightness(float3 x, float3 xLast)
 {
-    // Calculate position along noise
+    // Calculate position along disk
+    float r = (x.x + xLast.x) / 2.0;
+    float phi = (x.z + xLast.z) / 2.0;
+    float rNorm = (r - 3.0 * horizonRadius) / (diskMax - 3.0 * horizonRadius);
+
+    // Calculate starting position
+    float3 startPos;
+    startPos.x = r * cos(phi + noiseCirculation * rNorm);
+    startPos.y = r * sin(phi + noiseCirculation * rNorm);
+    startPos.z = 0.0;
 
     // Calculate march direction
+    float3 marchDir = normalize(ToCartesianScalar(x) - ToCartesianScalar(xLast));
 
     // Calculate number of steps through volume
+    int numSteps = int(ceil(1.0 / (stepSize * length(marchDir.xz))));
+    numSteps = min(maxSteps, numSteps);
 
     // Loop through steps, marching through volume
+    float volumeDepth = 0.0;
+    float volumetricValue = 0.0;
+    float densitySum = 0.0;
+    for (int i = 0; i < numSteps; i++) {
 
         // Calculate density at next march step
+        volumeDepth += stepSize;
+        float3 position = startPos + volumeDepth * marchDir;
+        float density = noiseMultiplier * (SampleFBM(position * noiseScale + noiseOffset, noiseH, noiseOctaves) - noiseCutoff);
 
         // Calculate brightness/attenuation if in volume
+        bool isInVolume = density > 0.0;
+        if (isInVolume) {
+            densitySum += density;
+            float absorption = exp(-absorptionFactor * densitySum * stepSize);
+            volumetricValue += diskMult * density * stepSize * absorption;
+        }
+    }
 
-    // REduce intensity over distance
+    // Reduce intensity over distance
+    float falloff = rNorm < 0.0 ? exp(falloffRate * rNorm * diskMax / horizonRadius) : 1.0;
+    volumetricValue *= falloff;
 
-    return 0.0;
+    return volumetricValue;
 }
 
 // Get color of accretion disk
@@ -279,10 +311,11 @@ float4 GetDiskColor(float3 x, float3 xLast)
     uv.y = (abs(rEval) - 3.0 * horizonRadius) / (diskMax - 3.0 * horizonRadius);
 
     // Sample noise texture
-    float2 s;
+    float3 s;
     s.x = rEval*cos(phEval + noiseCirculation * uv.y);
     s.y = rEval*sin(phEval + noiseCirculation *uv.y);
-    float4 texColor = 0.5 * SampleFBM(s * noiseScale + noiseOffset, noiseH, noiseOctaves).xxxx;
+    s.z = 0.0;
+    float texColor = VolumetricDiskBrightness(x, xLast);
 
     // Reduce intensity over distance
     float falloff = uv.y < 0.0 ? exp(falloffRate * uv.y * diskMax / horizonRadius) : max((1.0 - uv.y), 0.0);
@@ -311,7 +344,10 @@ float4 GetDiskColor(float3 x, float3 xLast)
     float3 bbColor = _BlackbodyTexture.SampleLevel(sampler_BlackbodyTexture, uv, 0);
 
     // Weight by noise strength and multiplier
-    float4 outColor = texColor.xxxx * float4(bbColor.xyz, 1.0) * float4(diskMult.xxx, 1.0);
+    float4 outColor = texColor.xxxx * float4(bbColor.xyz, 1.0);
+
+    // Weight by Stefan-Boltzmann curve
+    outColor *= pow(abs(T / diskTemp), 4);
 
     // Return adjusted color
     return outColor;

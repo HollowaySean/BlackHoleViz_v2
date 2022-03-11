@@ -38,11 +38,14 @@ for n = 1:length(T)
         xyz = [X; Y; Z] / (X + Y + Z);
         RGB = XYZtoRGB(xyz);
         rgb = RGB / max(RGB);
+        luminance = [0.2126, 0.7152, 0.0722] * rgb;
+        rgb = rgb / luminance;
         rgb_out(n,m,:) = rgb;
     end
 end
 
 % Convert to single precision
+rgb_out = rgb_out / max(rgb_out, [], 'all');
 rgb_out = single(rgb_out);
 
 % Plot result
