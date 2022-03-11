@@ -1,12 +1,9 @@
+Physics:
+- Kerr metric
+
 Improve Accretion Disk:
 - Density waves?
+- Fluid simulation?
 
 Cinematic Effect:
 - Implement bloom?
-
-Physics:
-- Kerr metric?
-
-Improvements:
-- Improve file saving system
-- Camera motion system

@@ -299,7 +299,8 @@ Transform:
   m_LocalRotation: {x: 0.15304592, y: 0.6903455, z: -0.030843511, w: 0.7064338}
   m_LocalPosition: {x: -4, y: 1, z: 0}
   m_LocalScale: {x: 1, y: 1, z: 1}
-  m_Children: []
+  m_Children:
+  - {fileID: 1551754295}
   m_Father: {fileID: 0}
   m_RootOrder: 0
   m_LocalEulerAnglesHint: {x: 15, y: 90, z: 10}
@@ -325,13 +326,15 @@ MonoBehaviour:
   poleStep: 0.0001
   escapeDistance: 10000
   horizonRadius: 0.5
-  diskMax: 5
-  diskTemp: 6000
+  diskMax: 3.2
+  diskTemp: 4000
   falloffRate: 1.5
   beamExponent: 1.5
+  rotationSpeed: 1
+  timeDelayFactor: 0.25
   noiseOffset: {x: 0, y: 0, z: 0}
   noiseScale: 1.5
-  noiseCirculation: 1.5707964
+  noiseCirculation: 1.5708
   noiseH: 0.5
   noiseOctaves: 10
   stepSize: 0.01
@@ -341,14 +344,22 @@ MonoBehaviour:
   maxSteps: 1000
   diskMult: 1
   starMult: 1
-  updateInterval: 10
-  overSample: 1
+  numFrames: 250
+  framesPerSecond: 25
+  updateInterval: 30
+  overSample: 8
   maxSoftPasses: 5000
   maxPasses: 10000
-  saveToFile: 0
-  filenamePrefix: test
+  saveToFile: 1
+  timeStampFile: 0
+  frameStampFile: 1
+  filenamePrefix: videotest9
+  subfolder: ~Video9
+  exitOnComplete: 1
   saveType: 0
-  cameraState: 1
+  cameraState: 0
+  motionPivot: {fileID: 1551754295}
+  sweptAngle: 90
 --- !u!45 &963194230
 Skybox:
   m_ObjectHideFlags: 0
@@ -358,3 +369,33 @@ Skybox:
   m_GameObject: {fileID: 963194225}
   m_Enabled: 1
   m_CustomSkybox: {fileID: 2100000, guid: 3eb5caccd14acd345bdc530f23a98015, type: 2}
+--- !u!1 &1551754294
+GameObject:
+  m_ObjectHideFlags: 0
+  m_CorrespondingSourceObject: {fileID: 0}
+  m_PrefabInstance: {fileID: 0}
+  m_PrefabAsset: {fileID: 0}
+  serializedVersion: 6
+  m_Component:
+  - component: {fileID: 1551754295}
+  m_Layer: 0
+  m_Name: Motion Pivot
+  m_TagString: Untagged
+  m_Icon: {fileID: 0}
+  m_NavMeshLayer: 0
+  m_StaticEditorFlags: 0
+  m_IsActive: 1
+--- !u!4 &1551754295
+Transform:
+  m_ObjectHideFlags: 0
+  m_CorrespondingSourceObject: {fileID: 0}
+  m_PrefabInstance: {fileID: 0}
+  m_PrefabAsset: {fileID: 0}
+  m_GameObject: {fileID: 1551754294}
+  m_LocalRotation: {x: 0, y: 0, z: 0, w: 1}
+  m_LocalPosition: {x: 0, y: 0, z: 0}
+  m_LocalScale: {x: 1, y: 1, z: 1}
+  m_Children: []
+  m_Father: {fileID: 963194228}
+  m_RootOrder: 0
+  m_LocalEulerAnglesHint: {x: 0, y: 0, z: 0}
