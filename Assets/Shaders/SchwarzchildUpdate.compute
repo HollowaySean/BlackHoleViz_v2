@@ -1,0 +1,417 @@
+// Each #kernel tells which function to compile; you can have many kernels
+#pragma kernel CSMain
+
+// Constants
+static const float PI = 3.14159265f;
+
+// Output parameters
+RWTexture2D<float4> Position;
+RWTexture2D<float4> Direction;
+RWTexture2D<float4> Color;
+RWTexture2D<int> isComplete;
+
+// Input textures
+TextureCube<float4> _SkyboxTexture;
+Texture2D<float3> _BlackbodyTexture;
+
+// Noise parameters
+float3 noiseOffset;
+float noiseScale;
+float noiseCirculation;
+float noiseH;
+int noiseOctaves;
+
+// Volumetric noise parameters
+float stepSize;
+float absorptionFactor;
+float noiseCutoff;
+float noiseMultiplier;
+int maxSteps;
+
+// Step size parameters
+float timeStep;
+float poleMargin;
+float poleStep;
+bool hardCheck;
+
+// Physical parameters
+float escapeDistance;
+float horizonRadius;
+float diskMax;
+float diskTemp;
+float falloffRate;
+float beamExponent;
+float time;
+float rotationSpeed;
+float timeDelayFactor;
+
+// Brightness parameters
+float diskMult;
+float starMult;
+
+// Samplers
+SamplerState sampler_SkyboxTexture;
+SamplerState sampler_BlackbodyTexture;
+
+
+// Pseudorandom 3D function
+float Random(float3 sampleCoord)
+{
+    return frac(sin(dot(sampleCoord.xyz, float3(12.9898, 78.233, 49.551))) * 43758.5453123);
+}
+
+// 3D Noise function
+float Noise(float3 sampleCoord) {
+
+    // Separate integral and fractional components
+    float3 i = floor(sampleCoord);
+    float3 fr = frac(sampleCoord);
+
+    // Four corners of adjacent tile
+    float a = Random(i + float3(0.0, 0.0, 0.0));
+    float b = Random(i + float3(1.0, 0.0, 0.0));
+    float c = Random(i + float3(0.0, 1.0, 0.0));
+    float d = Random(i + float3(1.0, 1.0, 0.0));
+    float e = Random(i + float3(0.0, 0.0, 1.0));
+    float f = Random(i + float3(1.0, 0.0, 1.0));
+    float g = Random(i + float3(0.0, 1.0, 1.0));
+    float h = Random(i + float3(1.0, 1.0, 1.0));
+
+    // Smooth interpolation
+    float3 u = fr * fr * (3.0 - 2.0 * fr);
+
+    // Mix and return
+    float z0 = lerp(a, b, u.x) +
+        (c - a) * u.y * (1.0 - u.x) +
+        (d - b) * u.x * u.y;
+    float z1 = lerp(e, f, u.x) +
+        (g - e) * u.y * (1.0 - u.x) +
+        (h - f) * u.x * u.y;
+    return lerp(z0, z1, u.z);
+}
+
+// Fractional Brownian Motion for noise sampling
+float SampleFBM(float3 x, float H, int numOctaves)
+{
+    // Thank you, as always, to Inigo Quilez for this FBM code snippet
+    float G = exp2(-H);
+    float f = 1.0;
+    float a = 1.0;
+    float t = 0.0;
+    for (int i = 0; i < numOctaves; i++)
+    {
+        t += a * Noise(f * x);
+        f *= 2.0;
+        a *= G;
+    }
+    return t;
+}
+
+// Spherical to Cartesian coordinate conversion
+float3 ToCartesianScalar(float3 sph)
+{
+    float x = sph.x * cos(sph.z) * sin(sph.y);
+    float y = sph.x * cos(sph.y);
+    float z = sph.x * sin(sph.z) * sin(sph.y);
+
+    return float3(x, y, z);
+}
+
+// Calculate change in k along geodesic affine parameter
+void CalculateGeodesicDerivative(float3 x, float3 u, out float3 dx, out float3 du)
+{
+    // Pre-calculate factors
+    float r = x.x;
+    float rs = horizonRadius;
+    float th = x.y;
+    float sth = sin(th);
+    float A = 1.0 - (rs / r);
+    float a = sqrt(A);
+
+    // Calculate proper time derivative
+    float u0 = sqrt((A * u.x * u.x) + (u.y * u.y / (r * r)) + (u.z * u.z / (r * r * sth * sth))) / a;
+
+    // Calculate spatial derivatives
+    dx.x = A * u.x / u0;
+    dx.y = u.y / (r * r * u0);
+    dx.z = u.z / (r * r * sth * sth * u0);
+    du.x = 
+        (-u0 * rs / (2.0 * r * r)) +
+        (-u.x * u.x * rs / (2.0 * u0 * r * r)) +
+        (u.y * u.y / (r * r * r * u0)) + 
+        (u.z * u.z / (r * r * r * sth * sth * u0));
+    du.y = (u.z * u.z / (r * r * sth * sth * tan(th) * u0));
+    du.z = 0.0;
+
+    return;
+}
+
+// Runge-Kutta 4th Order integration
+void RK4Step(float tStep, inout float3 x, inout float3 u)
+{
+    // Calculate k-factors
+    float3 dx1, du1, dx2, du2, dx3, du3, dx4, du4;
+    CalculateGeodesicDerivative(x, u, dx1, du1);
+    CalculateGeodesicDerivative(x + dx1 * (tStep / 2.0), u + du1 * (tStep / 2.0), dx2, du2);
+    CalculateGeodesicDerivative(x + dx2 * (tStep / 2.0), u + du2 * (tStep / 2.0), dx3, du3);
+    CalculateGeodesicDerivative(x + dx3 * tStep,         u + du3 * tStep,         dx4, du4);
+
+    // Calculate full update
+    x += (tStep / 6.0) * (dx1 + 2.0 * dx2 + 2.0 * dx3 + dx4);
+    u += (tStep / 6.0) * (du1 + 2.0 * du2 + 2.0 * du3 + du4);
+}
+
+// Generate affine parameter step size
+float CalculateStepSize(float3 x, float3 u)
+{
+    float rs = horizonRadius;
+
+    // Check if near singular points
+    if (x.y < poleMargin * PI || x.y > (1.0 - poleMargin) * PI)
+    {
+        return poleStep;
+    }
+    
+    // Check if near horizon
+    if (abs(x.x) < 2.0 * rs)
+    {
+        // Near horizon regime
+        return timeStep;
+    }
+
+    // Check if receding
+    if (u.x * x.x > 0.0)
+    {
+        // Far from horizon, receding
+        return max(timeStep * x.x * x.x, timeStep);
+    }
+    else
+    {
+        // Far from horizon, approaching
+        return max(timeStep * (abs(x.x) - (2.0 * rs)), timeStep);
+        }
+}
+
+// Check if geodesic inevitably crosses horizon
+bool HorizonCheck(float3 x, float3 u)
+{
+    // Check if inside of photon sphere
+    if (abs(x.x) < 1.5 * horizonRadius) {
+        return true;
+    }
+
+    // Break here if not doing thorough checking
+    if (!hardCheck) {
+        return false;
+    }
+
+    // Check if stuck near poles
+    if (x.y < poleMargin * PI || (x.y > (1.0 - poleMargin) * PI))
+    {
+        return true;
+    }
+
+    // Check if stuck in orbit
+    if (abs(x.x) < 2.0 * horizonRadius) {
+
+        // Pre-calculate factors
+        float r = x.x;
+        float rs = horizonRadius;
+        float th = x.y;
+        float sth = sin(th);
+        float A = 1.0 - (rs / r);
+        float a = sqrt(A);
+
+        // Calculate motion constants
+        float E = sqrt((A * u.x * u.x) + (u.y * u.y / (r * r)) + (u.z * u.z / (r * r * sth * sth))) / a;
+        float C = u.z * u.z / (E * E);
+
+        // Check if geodesic originates inside of horizon
+        if (C > (27.0 / 4.0) * rs * rs) {
+            return true;
+        }
+        else {
+            return (x.x * u.x < 0.0);
+        }
+    }
+
+    // Otherwise, keep going
+    return false;
+}
+
+// Check if path will cross accretion disk
+bool DiskCheck(float3 x, float3 xLast)
+{
+    // Check for hemisphere change
+    float newTh = (x.y % PI) - (PI / 2.0);
+    float oldTh = (xLast.y % PI) - (PI / 2.0);
+    if (newTh * oldTh > 0.0) { return false; }
+
+    // Check if within accretion disk bounds
+    float r_ave = (x.x + xLast.x) / 2.0;
+    if (r_ave < 1.5 * horizonRadius || r_ave > diskMax) { return false; }
+
+    // If passed, return true
+    return true;
+}
+
+// Volumetric rendering of circumstellar disk
+float VolumetricDiskBrightness(float3 x, float3 xLast, float t)
+{
+    // Calculate position along disk
+    float r = (x.x + xLast.x) / 2.0;
+    float phi = (x.z + xLast.z) / 2.0;
+    float rNorm = (r - 3.0 * horizonRadius) / (diskMax - 3.0 * horizonRadius);
+
+    // Calculate starting position
+    float3 startPos;
+    startPos.x = r * cos(phi + (noiseCirculation * rNorm) - ((time - timeDelayFactor *t) * rotationSpeed));
+    startPos.y = r * sin(phi + (noiseCirculation * rNorm) - ((time - timeDelayFactor *t) * rotationSpeed));
+    startPos.z = 0.0;
+
+    // Calculate march direction
+    float3 marchDir = normalize(ToCartesianScalar(x) - ToCartesianScalar(xLast));
+
+    // Calculate number of steps through volume
+    int numSteps = int(ceil(1.0 / (stepSize * length(marchDir.xz))));
+    numSteps = min(maxSteps, numSteps);
+
+    // Loop through steps, marching through volume
+    float volumeDepth = 0.0;
+    float volumetricValue = 0.0;
+    float densitySum = 0.0;
+    for (int i = 0; i < numSteps; i++) {
+
+        // Calculate density at next march step
+        volumeDepth += stepSize;
+        float3 position = startPos + volumeDepth * marchDir;
+        float density = noiseMultiplier * (SampleFBM(position * noiseScale + noiseOffset, noiseH, noiseOctaves) - noiseCutoff);
+
+        // Calculate brightness/attenuation if in volume
+        bool isInVolume = density > 0.0;
+        if (isInVolume) {
+            densitySum += density;
+            float absorption = exp(-absorptionFactor * densitySum * stepSize);
+            volumetricValue += diskMult * density * stepSize * absorption;
+        }
+    }
+
+    // Reduce intensity over distance
+    float falloff = rNorm < 0.0 ? exp(falloffRate * rNorm * diskMax / horizonRadius) : 1.0;
+    volumetricValue *= falloff;
+
+    return volumetricValue;
+}
+
+// Get color of accretion disk
+float4 GetDiskColor(float3 x, float3 xLast, float t)
+{
+    // Calculate noise texture UV coordinates
+    float2 uv;
+    float rEval = (x.x + xLast.x) / 2.0;
+    float phEval = (x.z + xLast.z) / 2.0;
+    uv.x = phEval / (2.0 * PI);
+    uv.y = (abs(rEval) - 3.0 * horizonRadius) / (diskMax - 3.0 * horizonRadius);
+
+    // Sample noise texture
+    float texColor = VolumetricDiskBrightness(x, xLast, t);
+
+    // Reduce intensity over distance
+    float falloff = uv.y < 0.0 ? exp(falloffRate * uv.y * diskMax / horizonRadius) : max((1.0 - uv.y), 0.0);
+    texColor *= falloff;
+
+    // Calculate temperature
+    float rFactor = pow(abs(3.0 * horizonRadius / rEval), 0.75);
+    float T = diskTemp * rFactor;
+
+    // Calculate doppler shift
+    float v = sqrt(horizonRadius / (2.0 * rEval));
+    float gamma = 1.0 / sqrt(1.0 - (v * v));
+    float3 xDiff = xLast - x;
+    float incidence = xDiff.z * rEval / length(xDiff * float3(1.0, rEval, rEval));
+    float shift = gamma * (1.0 + v * incidence);
+
+    // Relativistic beaming
+    texColor *= pow(abs(shift), beamExponent);
+
+    // Calculate gravitational redshift
+    shift *= sqrt(1 - (horizonRadius / rEval));
+
+    // Sample blackbody texture
+    uv.x = (shift - 0.5) / (2.0 - 0.5);
+    uv.y = (T - 1000.0) / (10000.0 - 1000.0);
+    float3 bbColor = _BlackbodyTexture.SampleLevel(sampler_BlackbodyTexture, uv, 0);
+
+    // Weight by noise strength and multiplier
+    float4 outColor = texColor.xxxx * float4(bbColor.xyz, 1.0);
+
+    // Weight by Stefan-Boltzmann curve
+    outColor *= pow(abs(T / diskTemp), 4);
+
+    // Return adjusted color
+    return outColor;
+}
+
+// Blend transparency and background colors
+float4 Blend(float4 foreColor, float4 backColor)
+{
+    // Blend using previous color's alpha
+    //float4 outColor = foreColor + backColor * (1.0 - foreColor.w);
+    float4 outColor = foreColor + backColor;
+    return outColor;
+}
+
+[numthreads(8, 8, 1)]
+void CSMain (uint3 id : SV_DispatchThreadID)
+{
+    // Break if already failed bounds check
+    if (isComplete[id.xy] == 1) { return; }
+
+    // Propagate ray
+    float3 x =  Position[id.xy].xyz;
+    float  t = Position[id.xy].w;
+    float3 u = Direction[id.xy].xyz;
+    float3 xLast = x;
+    float dt = CalculateStepSize(x, u);
+    RK4Step(dt, x, u);
+
+    // Write back position and direction
+    t += dt;
+    Position[id.xy]  = float4(x.xyz, t);
+    Direction[id.xy] = float4(u.xyz, 0.0);
+
+    // Check for disk crossing
+    if (DiskCheck(x, xLast))
+    {
+        // Save color from accretion disk noise function
+        Color[id.xy] = Blend(Color[id.xy], GetDiskColor(x, xLast, t));
+    }
+
+    // Check for horizon condition
+    if (HorizonCheck(x, u))
+    {
+        // Blend black with previous color
+        Color[id.xy] = Blend(Color[id.xy], float4(0.0, 0.0, 0.0, 1.0));
+
+        // Set complete flag
+        isComplete[id.xy] = 1;
+    }
+
+    // Check for escape condition
+    if (abs(x.x) > escapeDistance * horizonRadius)
+    {
+        // Evaluate skybox texture
+        float3 outRay = ToCartesianScalar(x.xyz).xyz;
+        outRay.z *= -1.0;
+        float4 skyboxColor = _SkyboxTexture.SampleLevel(sampler_SkyboxTexture, outRay, 0);
+        skyboxColor *= float4(starMult.xxx, 1.0);
+
+        // Blend with previous color value
+        Color[id.xy] = Blend(Color[id.xy], skyboxColor);
+
+        // Set complete flag
+        isComplete[id.xy] = 1;
+    }
+
+
+}

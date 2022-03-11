@@ -61,12 +61,16 @@ public class RayTraceCamera : MonoBehaviour
     public string filenamePrefix = "";
     public string subfolder = "";
     public bool exitOnComplete = false;
+    public SaveType saveType = SaveType.JPEG;
+    public CameraState cameraState = CameraState.relativistic;
+
+    [Header("Camera Motion Settings")]
+    public Transform motionPivot;
+    public float sweptAngle;
 
     public enum SaveType { JPEG, PNG };
-    public SaveType saveType = SaveType.JPEG;
 
     public enum CameraState { relativistic, simple, unity };
-    public CameraState cameraState = CameraState.relativistic;
 
     // Private objects
     private Camera _camera;
@@ -375,9 +379,22 @@ public class RayTraceCamera : MonoBehaviour
             Debug.Log("Render cycle complete!");
 
             // Quit application
-            if(exitOnComplete) { Application.Quit(); }
+            if(exitOnComplete) { 
+                
+                Application.Quit();
+
+#if UNITY_EDITOR
+                UnityEditor.EditorApplication.isPlaying = false;
+#endif
+
+            }
 
         } else {
+
+            // Move camera around central mass
+            transform.RotateAround(Vector3.zero, motionPivot.up, sweptAngle / numFrames);
+
+            // Advance time and reset settings
             coordinateTime += (1f / framesPerSecond);
             ResetSettings();
         }
@@ -424,11 +441,20 @@ public class RayTraceCamera : MonoBehaviour
                     filename += ".png";
                     break;
             }
+
+            // Set up path to directory
             string fullPath = Application.dataPath + "/Output/";
             fullPath = string.IsNullOrEmpty(subfolder) ? fullPath : fullPath + subfolder + "/";
-            File.WriteAllBytes(fullPath + filename, bytes);
 
+            // Ensure existence of directory
+            if(!Directory.Exists(fullPath)) {
+                Directory.CreateDirectory(fullPath);
+            }
+
+            // Save file
+            File.WriteAllBytes(fullPath + filename, bytes);
             Debug.Log("File saved.");
+
         } catch {
 
             Debug.LogWarning("ERROR: Failure to save file.");
