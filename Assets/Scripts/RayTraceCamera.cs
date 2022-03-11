@@ -27,6 +27,8 @@ public class RayTraceCamera : MonoBehaviour
     public float diskTemp = 1E4F;
     public float falloffRate = 10f;
     public float beamExponent = 2f;
+    public float rotationSpeed = 1f;
+    public float timeDelayFactor = 0.1f;
 
     [Header("Noise Parameters")]
     public Vector3 noiseOffset = new Vector3(0f, 0f, 0f);
@@ -47,12 +49,18 @@ public class RayTraceCamera : MonoBehaviour
     public float starMult = 1f;
 
     [Header("Renderer Settings")]
+    public int numFrames = 60;
+    public float framesPerSecond = 30f;
     public float updateInterval = 15f;
     public int overSample = 4;
     public int maxSoftPasses = 5000;
     public int maxPasses = 10000;
     public bool saveToFile = false;
+    public bool timeStampFile = false;
+    public bool frameStampFile = true;
     public string filenamePrefix = "";
+    public string subfolder = "";
+    public bool exitOnComplete = false;
 
     public enum SaveType { JPEG, PNG };
     public SaveType saveType = SaveType.JPEG;
@@ -72,9 +80,11 @@ public class RayTraceCamera : MonoBehaviour
     private float
         startTime = 0f,
         checkTimer = 0f,
-        numThreads = 8f;
+        numThreads = 8f,
+        coordinateTime = 0f;
     private int
-        currentPass = 0;
+        currentPass = 0,
+        currentFrame = 0;
     private Vector2Int
         lastCheck = new Vector2Int(0, 0);
     private bool
@@ -155,6 +165,9 @@ public class RayTraceCamera : MonoBehaviour
         rayUpdateShader.SetFloat("diskMult", diskMult);
         rayUpdateShader.SetFloat("starMult", starMult);
         rayUpdateShader.SetBool("hardCheck", hardCheck);
+        rayUpdateShader.SetFloat("time", coordinateTime);
+        rayUpdateShader.SetFloat("rotationSpeed", rotationSpeed);
+        rayUpdateShader.SetFloat("timeDelayFactor", timeDelayFactor);
     }
 
     private void SetSimpleShaderParameters() {
@@ -180,6 +193,9 @@ public class RayTraceCamera : MonoBehaviour
         simpleRayTracingShader.SetFloat("diskMult", diskMult);
         simpleRayTracingShader.SetFloat("starMult", starMult);
         simpleRayTracingShader.SetInt("sampleRate", overSample);
+        simpleRayTracingShader.SetFloat("time", Time.time);
+        simpleRayTracingShader.SetFloat("rotationSpeed", rotationSpeed);
+        simpleRayTracingShader.SetFloat("timeDelayFactor", timeDelayFactor);
     }
 
     private void OnRenderImage(RenderTexture source, RenderTexture destination) {
@@ -218,9 +234,7 @@ public class RayTraceCamera : MonoBehaviour
 
         // Restart render on spacebar
         if (Input.GetKeyDown(KeyCode.Space)) {
-            startRender = true;
-            renderComplete = false;
-            hardCheck = false;
+            ResetSettings();
         }
 
         // Step through ray trace if not complete
@@ -353,6 +367,26 @@ public class RayTraceCamera : MonoBehaviour
         // Save image file
         if(saveToFile) { SaveToFile(_color); }
 
+        // Update coordinate time
+        currentFrame++;
+        if (currentFrame >= numFrames) {
+
+            // Console readout
+            Debug.Log("Render cycle complete!");
+
+            // Quit application
+            if(exitOnComplete) { Application.Quit(); }
+
+        } else {
+            coordinateTime += (1f / framesPerSecond);
+            ResetSettings();
+        }
+    }
+
+    private void ResetSettings() {
+        startRender = true;
+        renderComplete = false;
+        hardCheck = false;
     }
 
     private void SaveToFile(RenderTexture saveTexture) {
@@ -379,20 +413,23 @@ public class RayTraceCamera : MonoBehaviour
         try {
 
             // Set up filename and save
-            string filename = string.IsNullOrEmpty(filenamePrefix) ? "" : filenamePrefix + "_";
+            string filename = string.IsNullOrEmpty(filenamePrefix) ? "" : filenamePrefix;
+            filename = frameStampFile ? filename + "_" +  currentFrame.ToString() : filename;
+            filename = timeStampFile ? filename + "_" + System.DateTime.Now.ToString("MMddyyyy_hhmmss") : filename;
             switch (saveType) {
                 case SaveType.JPEG:
-                    filename += System.DateTime.Now.ToString("MMddyyyy_hhmmss") + ".jpg";
+                    filename += ".jpg";
                     break;
                 case SaveType.PNG:
-                    filename += System.DateTime.Now.ToString("MMddyyyy_hhmmss") + ".png";
+                    filename += ".png";
                     break;
             }
-            File.WriteAllBytes(Application.dataPath + "/Output/" + filename, bytes);
+            string fullPath = Application.dataPath + "/Output/";
+            fullPath = string.IsNullOrEmpty(subfolder) ? fullPath : fullPath + subfolder + "/";
+            File.WriteAllBytes(fullPath + filename, bytes);
 
             Debug.Log("File saved.");
-        }
-        catch {
+        } catch {
 
             Debug.LogWarning("ERROR: Failure to save file.");
         }

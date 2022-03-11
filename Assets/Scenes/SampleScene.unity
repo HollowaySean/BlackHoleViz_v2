@@ -319,13 +319,13 @@ MonoBehaviour:
   rayUpdateShader: {fileID: 7200000, guid: 803f7e0016463014e9ad9f41a0735930, type: 3}
   simpleRayTracingShader: {fileID: 7200000, guid: 40556c5e86fa1e84aaf4ca0762f1f89c, type: 3}
   skyboxTexture: {fileID: 8900000, guid: e8e1bea99525f9a4da79fb1967fb3e11, type: 2}
-  BlackbodyTexture: {fileID: 2800000, guid: 6f8d983e2bb4a704d917864debb8b649, type: 3}
+  BlackbodyTexture: {fileID: 2800000, guid: a8a2397f2e1054e4c809883fcc650452, type: 3}
   timeStep: 0.01
   poleMargin: 0.01
   poleStep: 0.0001
   escapeDistance: 10000
   horizonRadius: 0.5
-  diskMax: 3.2
+  diskMax: 5
   diskTemp: 6000
   falloffRate: 1.5
   beamExponent: 1.5
@@ -333,11 +333,11 @@ MonoBehaviour:
   noiseScale: 1.5
   noiseCirculation: 1.5707964
   noiseH: 0.5
-  noiseOctaves: 4
+  noiseOctaves: 10
   stepSize: 0.01
   absorptionFactor: 0
-  noiseCutoff: 0.75
-  noiseMultiplier: 1
+  noiseCutoff: 0.5
+  noiseMultiplier: 3
   maxSteps: 1000
   diskMult: 1
   starMult: 1

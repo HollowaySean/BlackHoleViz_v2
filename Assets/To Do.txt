@@ -1,10 +1,11 @@
 Improve Accretion Disk:
-- Density waves
-- Stefan-boltzmann factor
+- Density waves?
 
 Cinematic Effect:
-- Implement bloom
+- Implement bloom?
+
+Physics:
+- Kerr metric?
 
 Improvements:
-- Generate video frames
-- Pass in time parameter
+- Improve file saving system

@@ -41,6 +41,9 @@ float diskMax;
 float diskTemp;
 float falloffRate;
 float beamExponent;
+float time;
+float rotationSpeed;
+float timeDelayFactor;
 
 // Brightness parameters
 float diskMult;
@@ -253,7 +256,7 @@ bool DiskCheck(float3 x, float3 xLast)
 }
 
 // Volumetric rendering of circumstellar disk
-float VolumetricDiskBrightness(float3 x, float3 xLast)
+float VolumetricDiskBrightness(float3 x, float3 xLast, float t)
 {
     // Calculate position along disk
     float r = (x.x + xLast.x) / 2.0;
@@ -262,8 +265,8 @@ float VolumetricDiskBrightness(float3 x, float3 xLast)
 
     // Calculate starting position
     float3 startPos;
-    startPos.x = r * cos(phi + noiseCirculation * rNorm);
-    startPos.y = r * sin(phi + noiseCirculation * rNorm);
+    startPos.x = r * cos(phi + (noiseCirculation * rNorm) - ((time - timeDelayFactor *t) * rotationSpeed));
+    startPos.y = r * sin(phi + (noiseCirculation * rNorm) - ((time - timeDelayFactor *t) * rotationSpeed));
     startPos.z = 0.0;
 
     // Calculate march direction
@@ -301,7 +304,7 @@ float VolumetricDiskBrightness(float3 x, float3 xLast)
 }
 
 // Get color of accretion disk
-float4 GetDiskColor(float3 x, float3 xLast)
+float4 GetDiskColor(float3 x, float3 xLast, float t)
 {
     // Calculate noise texture UV coordinates
     float2 uv;
@@ -311,11 +314,7 @@ float4 GetDiskColor(float3 x, float3 xLast)
     uv.y = (abs(rEval) - 3.0 * horizonRadius) / (diskMax - 3.0 * horizonRadius);
 
     // Sample noise texture
-    float3 s;
-    s.x = rEval*cos(phEval + noiseCirculation * uv.y);
-    s.y = rEval*sin(phEval + noiseCirculation *uv.y);
-    s.z = 0.0;
-    float texColor = VolumetricDiskBrightness(x, xLast);
+    float texColor = VolumetricDiskBrightness(x, xLast, t);
 
     // Reduce intensity over distance
     float falloff = uv.y < 0.0 ? exp(falloffRate * uv.y * diskMax / horizonRadius) : max((1.0 - uv.y), 0.0);
@@ -370,20 +369,22 @@ void CSMain (uint3 id : SV_DispatchThreadID)
 
     // Propagate ray
     float3 x =  Position[id.xy].xyz;
+    float  t = Position[id.xy].w;
     float3 u = Direction[id.xy].xyz;
     float3 xLast = x;
     float dt = CalculateStepSize(x, u);
     RK4Step(dt, x, u);
 
     // Write back position and direction
-    Position[id.xy]  = float4(x.xyz, 0.0);
+    t += dt;
+    Position[id.xy]  = float4(x.xyz, t);
     Direction[id.xy] = float4(u.xyz, 0.0);
 
     // Check for disk crossing
     if (DiskCheck(x, xLast))
     {
         // Save color from accretion disk noise function
-        Color[id.xy] = Blend(Color[id.xy], GetDiskColor(x, xLast));
+        Color[id.xy] = Blend(Color[id.xy], GetDiskColor(x, xLast, t));
     }
 
     // Check for horizon condition

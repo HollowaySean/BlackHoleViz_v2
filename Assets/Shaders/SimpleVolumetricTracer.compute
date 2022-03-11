@@ -36,6 +36,9 @@ float diskMax;
 float diskTemp;
 float falloffRate;
 float beamExponent;
+float time;
+float rotationSpeed;
+float timeDelayFactor;
 
 // Brightness parameters
 float diskMult;
@@ -185,6 +188,38 @@ void IntersectSphere(Ray ray, inout RayHit bestHit, float4 sphere)
 RayHit SecondTrace(Ray ray);
 float4 Shade(inout Ray ray, RayHit hit);
 
+// Smooth union for SDFs
+float sdSmoothUnion(float d1, float d2, float k)
+{
+    float h = clamp(0.5 + 0.5 * (d2 - d1) / k, 0.0, 1.0);
+    return lerp(d2, d1, h) - k * h * (1.0 - h);
+}
+
+// SDF for sphere
+float sdSphere(float3 p, float s)
+{
+    return length(p) - s;
+}
+
+// SDF for infinite cylinder
+float sdCylinder(float3 p, float s)
+{
+    return length(p.xz) - s;
+}
+
+// SDF for planar spiral
+float sdSpiral(float r, float phi, float a, float s)
+{
+    return (r < a* phi ? a * phi : abs(((r - a * phi) % (a * 2.0 * PI)) - a * PI)) - s;
+}
+
+// SDF for double spiral
+float sdDoubleSpiral(float r, float phi, float a, float s, float k)
+{
+    return sdSmoothUnion(sdSpiral(r, phi, a, s), sdSpiral(r, phi - PI, a, s), k);
+}
+
+// Volumetric gas clouds using ray marching
 float VolumetricDiskBrightness(Ray ray)
 {
     // Calculate hit position
@@ -193,6 +228,8 @@ float VolumetricDiskBrightness(Ray ray)
     float z = ray.origin.z + ray.direction.z * t;
     float3 hitPosition = float3(x, 0.0, z);
 
+    float dt = length(ray.origin - hitPosition) * timeDelayFactor;
+
     // Calculate position parameters
     float r = length(hitPosition);
     float phi = atan2(z, x);
@@ -200,10 +237,13 @@ float VolumetricDiskBrightness(Ray ray)
 
     // Calculate starting position 
     float3 startPos;
-    startPos.x = r * cos(phi + noiseCirculation * rNorm);
-    startPos.y = r * sin(phi + noiseCirculation * rNorm);
+    startPos.x = r * cos(phi + noiseCirculation * rNorm - ((time - dt) * rotationSpeed));
+    startPos.y = r * sin(phi + noiseCirculation * rNorm - ((time - dt) * rotationSpeed));
     startPos.z = 0.0;
-    //float3 marchScale = float3(noiseScale, verticalScale, noiseScale);
+    float3 rawPos;
+    rawPos.x = r * cos(phi);
+    rawPos.y = r * sin(phi);
+    rawPos.z = 0.0;
 
     // Calculate number of steps through volume
     int numSteps = int(ceil(1.0 / (stepSize * length(ray.direction.xz))));
@@ -230,8 +270,7 @@ float VolumetricDiskBrightness(Ray ray)
     }
 
     // Reduce intensity over distance
-    float falloff = rNorm < 0.0 ? exp(falloffRate * rNorm * diskMax / horizonRadius) : max((1.0 - rNorm), 0.0);
-    //float falloff = rNorm < 0.0 ? exp(falloffRate * rNorm * diskMax / horizonRadius) : 1.0;
+    float falloff = rNorm < 0.0 ? exp(falloffRate * rNorm * diskMax / horizonRadius) : 1.0;
     volumetricValue *= falloff;
 
     return volumetricValue;
