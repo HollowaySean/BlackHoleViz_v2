@@ -7,3 +7,6 @@ Improve Accretion Disk:
 
 Cinematic Effect:
 - Implement bloom?
+
+Fixes:
+- Check if angle on relativistic beaming is correct
