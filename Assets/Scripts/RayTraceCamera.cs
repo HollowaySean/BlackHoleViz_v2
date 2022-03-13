@@ -226,14 +226,14 @@ public class RayTraceCamera : MonoBehaviour
             return;
         }
 
-        // Skip if using simple renderer
-        if (cameraState == CameraState.simple) {
-            return;
-        }
-
         // Manually save on S key
         if (Input.GetKeyDown(KeyCode.S)) {
             SaveToFile(cameraState == CameraState.relativistic ? _color : _simpleTarget);
+        }
+
+        // Skip if using simple renderer
+        if (cameraState == CameraState.simple) {
+            return;
         }
 
         // Restart render on spacebar

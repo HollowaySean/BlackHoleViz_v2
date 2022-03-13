@@ -186,6 +186,9 @@ void IntersectAlignedDisk(Ray ray, inout RayHit bestHit, float r1, float r2)
         bestHit.distance = t;
         bestHit.position = float3(x, 0.0, z);
         bestHit.normal = float3(0.0, 1.0, 0.0);
+        
+        bestHit.color = float4(1.0, 1.0, 1.0, 1.0);
+        return;
 
         // Sample noise texture
         float r = sqrt(p);

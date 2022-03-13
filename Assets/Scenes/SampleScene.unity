@@ -297,13 +297,13 @@ Transform:
   m_PrefabInstance: {fileID: 0}
   m_PrefabAsset: {fileID: 0}
   m_GameObject: {fileID: 963194225}
-  m_LocalRotation: {x: 0, y: 0.7071068, z: 0, w: 0.7071068}
-  m_LocalPosition: {x: -4, y: 0.1, z: 0}
+  m_LocalRotation: {x: 0.09229593, y: 0.7010574, z: -0.09229593, w: 0.7010574}
+  m_LocalPosition: {x: -4, y: 1, z: 0}
   m_LocalScale: {x: 1, y: 1, z: 1}
   m_Children: []
   m_Father: {fileID: 0}
   m_RootOrder: 0
-  m_LocalEulerAnglesHint: {x: 0, y: 90, z: 0}
+  m_LocalEulerAnglesHint: {x: 15, y: 90, z: 0}
 --- !u!114 &963194229
 MonoBehaviour:
   m_ObjectHideFlags: 0
@@ -318,7 +318,7 @@ MonoBehaviour:
   m_EditorClassIdentifier: 
   cameraVectorShader: {fileID: 7200000, guid: eff2d974d7c28b547b5fab968065b5ac, type: 3}
   rayUpdateShader: {fileID: 7200000, guid: 803f7e0016463014e9ad9f41a0735930, type: 3}
-  simpleRayTracingShader: {fileID: 7200000, guid: 40556c5e86fa1e84aaf4ca0762f1f89c, type: 3}
+  simpleRayTracingShader: {fileID: 7200000, guid: c1ca5e66a97a7a64297a3d7f474f0fd0, type: 3}
   skyboxTexture: {fileID: 8900000, guid: e8e1bea99525f9a4da79fb1967fb3e11, type: 2}
   BlackbodyTexture: {fileID: 2800000, guid: a8a2397f2e1054e4c809883fcc650452, type: 3}
   timeStep: 0.01
@@ -327,14 +327,14 @@ MonoBehaviour:
   escapeDistance: 10000
   horizonRadius: 0.5
   diskMax: 3.2
-  diskTemp: 10000
+  diskTemp: 4000
   falloffRate: 1.5
   beamExponent: 1.5
   rotationSpeed: 1
-  timeDelayFactor: 0.25
+  timeDelayFactor: 0
   noiseOffset: {x: 0, y: 0, z: 0}
   noiseScale: 1.5
-  noiseCirculation: 1.5708
+  noiseCirculation: 0
   noiseH: 0.5
   noiseOctaves: 10
   stepSize: 0.01
@@ -343,8 +343,8 @@ MonoBehaviour:
   noiseMultiplier: 3
   maxSteps: 1000
   diskMult: 1
-  starMult: 0.25
-  numFrames: 250
+  starMult: 1
+  numFrames: 1
   framesPerSecond: 25
   updateInterval: 30
   overSample: 8
@@ -353,13 +353,13 @@ MonoBehaviour:
   saveToFile: 1
   timeStampFile: 0
   frameStampFile: 1
-  filenamePrefix: videotest10
-  subfolder: Video10
+  filenamePrefix: testNoDelay_nocirc
+  subfolder: 
   exitOnComplete: 1
   saveType: 0
   cameraState: 0
   motionPivot: {fileID: 1551754295}
-  sweptAngle: 88
+  sweptAngle: 30
 --- !u!45 &963194230
 Skybox:
   m_ObjectHideFlags: 0
@@ -392,10 +392,10 @@ Transform:
   m_PrefabInstance: {fileID: 0}
   m_PrefabAsset: {fileID: 0}
   m_GameObject: {fileID: 1551754294}
-  m_LocalRotation: {x: -0.7071068, y: 0, z: 0, w: 0.7071068}
+  m_LocalRotation: {x: 0, y: 0, z: 0, w: 1}
   m_LocalPosition: {x: 0, y: 0, z: 0}
   m_LocalScale: {x: 1, y: 1, z: 1}
   m_Children: []
   m_Father: {fileID: 528781395}
   m_RootOrder: 0
-  m_LocalEulerAnglesHint: {x: -90, y: 0, z: 0}
+  m_LocalEulerAnglesHint: {x: 0, y: 0, z: 0}
