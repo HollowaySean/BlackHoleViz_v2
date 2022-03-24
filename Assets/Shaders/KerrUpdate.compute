@@ -37,6 +37,7 @@ bool hardCheck;
 // Physical parameters
 float escapeDistance;
 float horizonRadius;
+float spinFactor;
 float diskMax;
 float diskTemp;
 float falloffRate;
@@ -120,27 +121,63 @@ float3 ToCartesianScalar(float3 sph)
 // Calculate change in k along geodesic affine parameter
 void CalculateGeodesicDerivative(float3 x, float3 u, out float3 dx, out float3 du)
 {
-    // Pre-calculate factors
+    // Convert spin factor to Kerr parameter
+    float a = spinFactor * horizonRadius / 2.0;
+
+    // Read coordinate values
     float r = x.x;
     float rs = horizonRadius;
     float th = x.y;
     float sth = sin(th);
-    float A = 1.0 - (rs / r);
-    float a = sqrt(A);
+    float cth = cos(th);
 
-    // Calculate proper time derivative
-    float u0 = sqrt((A * u.x * u.x) + (u.y * u.y / (r * r)) + (u.z * u.z / (r * r * sth * sth))) / a;
+    // Calculate length scales
+    float sig = r * r + a * a * cth * cth;
+    float del = r * r - rs * r + a * a;
 
-    // Calculate spatial derivatives
-    dx.x = A * u.x / u0;
-    dx.y = u.y / (r * r * u0);
-    dx.z = u.z / (r * r * sth * sth * u0);
-    du.x = 
-        (-u0 * rs / (2.0 * r * r)) +
-        (-u.x * u.x * rs / (2.0 * u0 * r * r)) +
-        (u.y * u.y / (r * r * r * u0)) + 
-        (u.z * u.z / (r * r * r * sth * sth * u0));
-    du.y = (u.z * u.z / (r * r * sth * sth * tan(th) * u0));
+    // Calculate metric components
+    float gtt = -(1.0 - (rs * r) / sig);
+    float bph = -rs * r * a * sth * sth / sig;
+    float ypp = (r * r + a * a + rs * r * a * a * sth * sth / sig) * sth * sth;
+
+    // Calculate lapse function and energy
+    float alpha = sqrt((bph * bph / ypp) - gtt);
+    float u0 = sqrt((del * u.x * u.x / sig) + (u.y * u.y / sig) + (u.z * u.z / ypp)) / alpha;
+
+    // Calculate derivatives of metric
+    float dyrdr = (sig * (2.0 * r - rs) - 2.0 * r * del) / (sig * sig);
+    float dyrdt = -2.0 * a * a * cth * sth * del / (sig * sig);
+    float dytdr = -2.0 * r / (sig * sig);
+    float dytdt = 2.0 * a * a * cth * sth / (sig * sig);
+    float dypdr_lower = (2.0 * r + rs * a * a * sth * sth * (sig - (2.0 * r * r)) / (sig * sig)) * sth * sth;
+    float dypdr_upper = -dypdr_lower / (ypp * ypp);
+    float dypdt_lower = (rs * r * a * a / (sig * sig)) * (2.0 * cth * sth * sth * sth) * (2.0 * sig + a * a * sth * sth) + (r * r + a * a) * 2.0 * cth * sth;
+    float dypdt_upper = -dypdt_lower / (ypp * ypp);
+    float dbpdr_lower = -rs * a * sth * sth * (sig - 2.0 * r * r) / (sig * sig);
+    float dbpdr_upper = (ypp * dbpdr_lower - dypdr_lower * bph) / (ypp * ypp);
+    float dbpdt_lower = (-rs * r * a / (sig * sig)) * (2.0 * sth * cth * sig + 2.0 * a * a * cth * sth * sth * sth);
+    float dbpdt_upper = (ypp * dbpdt_lower - dypdt_lower * bph) / (ypp * ypp);
+    float dbpsqdr = (2.0 * bph * dbpdr_lower * ypp - bph * bph * dypdr_lower) / (ypp * ypp);
+    float dbpsqdt = (2.0 * bph * dbpdt_lower * ypp - bph * bph * dypdt_lower) / (ypp * ypp);
+    float dgdr = rs * (sig - 2.0 * r * r) / (sig * sig);
+    float dgdt = 2.0 * rs * r * a * a * cth * sth / (sig * sig);
+
+    // Calculate derivatives of position
+    dx.x = (del / sig) * (u.x / u0);
+    dx.y = (1.0 / sig) * (u.y / u0);
+    dx.z = (1.0 / ypp) * ((u.z / u0) - bph);
+
+    // Calculate derivatives of velocity
+    du.x = (u0 / 2.0) * (dgdr - dbpsqdr);
+    du.x += u.z * (dbpdr_upper);
+    du.x -= (u.x * u.x * 0.5 / u0) * (dyrdr);
+    du.x -= (u.y * u.y * 0.5 / u0) * (dytdr);
+    du.x -= (u.z * u.z * 0.5 / u0) * (dypdr_upper);
+    du.y = (u0 / 2.0) * (dgdt - dbpsqdt);
+    du.y += u.z * (dbpdt_upper);
+    du.y -= (u.x * u.x * 0.5 / u0) * (dyrdt);
+    du.y -= (u.y * u.y * 0.5 / u0) * (dytdt);
+    du.y -= (u.z * u.z * 0.5 / u0) * (dypdt_upper);
     du.z = 0.0;
 
     return;
@@ -388,14 +425,14 @@ void CSMain (uint3 id : SV_DispatchThreadID)
     }
 
     // Check for horizon condition
-    if (HorizonCheck(x, u))
-    {
-        // Blend black with previous color
-        Color[id.xy] = Blend(Color[id.xy], float4(0.0, 0.0, 0.0, 1.0));
+    //if (HorizonCheck(x, u))
+    //{
+    //    // Blend black with previous color
+    //    Color[id.xy] = Blend(Color[id.xy], float4(0.0, 0.0, 0.0, 1.0));
 
-        // Set complete flag
-        isComplete[id.xy] = 1;
-    }
+    //    // Set complete flag
+    //    isComplete[id.xy] = 1;
+    //}
 
     // Check for escape condition
     if (abs(x.x) > escapeDistance * horizonRadius)

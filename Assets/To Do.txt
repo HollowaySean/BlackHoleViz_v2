@@ -1,12 +1,10 @@
-Physics:
-- Kerr metric
-
 Improve Accretion Disk:
-- Density waves?
-- Fluid simulation?
+- Fluid simulation
 
 Cinematic Effect:
 - Implement bloom?
+- Seperate background and disk textures for exposure balancing?
 
 Fixes:
+- Input spin value from editor
 - Check if angle on relativistic beaming is correct

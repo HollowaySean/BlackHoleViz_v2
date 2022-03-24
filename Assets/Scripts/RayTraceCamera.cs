@@ -22,6 +22,8 @@ public class RayTraceCamera : MonoBehaviour
 
     [Header("Physical Parameters")]
     public float horizonRadius = 0.5f;
+    [Range(-1f, 1f)]
+    public float spinFactor = 0.0f;
     public float diskMax = 4f;
     [Range(1E3F, 1E4F)]
     public float diskTemp = 1E4F;
@@ -162,6 +164,7 @@ public class RayTraceCamera : MonoBehaviour
         rayUpdateShader.SetFloat("poleStep", poleStep);
         rayUpdateShader.SetFloat("escapeDistance", escapeDistance);
         rayUpdateShader.SetFloat("horizonRadius", horizonRadius);
+        rayUpdateShader.SetFloat("spinFactor", spinFactor);
         rayUpdateShader.SetFloat("diskMax", diskMax);
         rayUpdateShader.SetFloat("diskTemp", diskTemp);
         rayUpdateShader.SetFloat("falloffRate", falloffRate);
