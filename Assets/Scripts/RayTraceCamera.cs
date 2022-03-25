@@ -9,6 +9,7 @@ public class RayTraceCamera : MonoBehaviour
     public ComputeShader cameraVectorShader;
     public ComputeShader rayUpdateShader;
     public ComputeShader simpleRayTracingShader;
+    public ComputeShader fluidSimShader;
 
     [Header("Textures")]
     public Cubemap skyboxTexture;
@@ -46,6 +47,10 @@ public class RayTraceCamera : MonoBehaviour
     public float noiseMultiplier = 1f;
     public int maxSteps = 20;
 
+    [Header("Fluid Sim Parameters")]
+    public int fluidSize = 512;
+    public float timeScale = 1f;
+
     [Header("Brightness Modifiers")]
     public float diskMult = 1f;
     public float starMult = 1f;
@@ -72,7 +77,7 @@ public class RayTraceCamera : MonoBehaviour
 
     public enum SaveType { JPEG, PNG };
 
-    public enum CameraState { relativistic, simple, unity };
+    public enum CameraState { relativistic, simple, fluid, unity };
 
     // Private objects
     private Camera _camera;
@@ -81,6 +86,7 @@ public class RayTraceCamera : MonoBehaviour
     private RenderTexture _color;
     private RenderTexture _isComplete;
     private RenderTexture _simpleTarget;
+    private RenderTexture _fluidState;
 
     // Private variables
     private float
@@ -101,6 +107,9 @@ public class RayTraceCamera : MonoBehaviour
     private void Awake() {
         _camera = GetComponent<Camera>();
         BlackbodyTexture.wrapMode = TextureWrapMode.Clamp;
+
+        // Initialize fluid texture
+        SetupTexture(ref _fluidState, RenderTextureFormat.ARGBFloat, fluidSize, fluidSize);
     }
 
     private void InitRenderTextures() {
@@ -208,6 +217,9 @@ public class RayTraceCamera : MonoBehaviour
     private void OnRenderImage(RenderTexture source, RenderTexture destination) {
 
         switch(cameraState) {
+            case CameraState.fluid:
+                Graphics.Blit(_fluidState, destination);
+                break;
             case CameraState.relativistic:
                 Graphics.Blit(_color, destination);
                 break;
@@ -231,7 +243,23 @@ public class RayTraceCamera : MonoBehaviour
 
         // Manually save on S key
         if (Input.GetKeyDown(KeyCode.S)) {
-            SaveToFile(cameraState == CameraState.relativistic ? _color : _simpleTarget);
+            switch(cameraState) {
+                case CameraState.relativistic:
+                    SaveToFile(_color);
+                    break;
+                case CameraState.fluid:
+                    SaveToFile(_fluidState);
+                    break;
+                case CameraState.simple:
+                    SaveToFile(_simpleTarget);
+                    break;
+            }
+        }
+
+        // Call for fluid update if running fluid simulator
+        if (cameraState == CameraState.fluid) {
+            StepFluidSim(Time.deltaTime * timeScale);
+            return;
         }
 
         // Skip if using simple renderer
@@ -313,6 +341,18 @@ public class RayTraceCamera : MonoBehaviour
         int threadGroupsX = Mathf.CeilToInt(overSample * Screen.width / numThreads);
         int threadGroupsY = Mathf.CeilToInt(overSample * Screen.height / numThreads);
         rayUpdateShader.Dispatch(0, threadGroupsX, threadGroupsY, 1);
+    }
+
+    private void StepFluidSim(float timeStep) {
+
+        // Make sure we have a current render target
+        InitSimpleRenderTexture();
+        // Set the target and dispatch the compute shader
+        fluidSimShader.SetTexture(0, "State", _fluidState);
+        fluidSimShader.SetFloat("timeStep", timeStep);
+        int threadGroupsX = Mathf.CeilToInt(fluidSize / 8.0f);
+        int threadGroupsY = Mathf.CeilToInt(fluidSize / 8.0f);
+        fluidSimShader.Dispatch(0, threadGroupsX, threadGroupsY, 1);
     }
 
     private void RenderSimple(RenderTexture destination) {

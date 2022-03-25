@@ -6,5 +6,4 @@ Cinematic Effect:
 - Seperate background and disk textures for exposure balancing?
 
 Fixes:
-- Input spin value from editor
 - Check if angle on relativistic beaming is correct

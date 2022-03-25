@@ -1,0 +1,62 @@
+// Each #kernel tells which function to compile; you can have many kernels
+#pragma kernel CSMain
+
+// Output textures
+RWTexture2D<float4> State;
+
+// Input parameters
+float timeStep;
+
+// Samplers
+SamplerState sampler_State;
+
+// Bilinear interpolation for textures
+float4 BiLerp(RWTexture2D<float4> textureIn, float2 samplePos) {
+
+    // Get fractional and integral parts
+    float2 fracPos = frac(samplePos);
+    int2 intPos = (int)floor(samplePos);
+
+    // TODO: BOUNDARY CHECK
+
+    // Get corner coords
+    int2 dl = intPos;
+    int2 ul = intPos + int2(0, 1);
+    int2 dr = intPos + int2(1, 0);
+    int2 ur = intPos + int2(1, 1);
+
+    // Horizontal interpolation
+    float4 a = lerp(textureIn[dl], textureIn[dr], fracPos.x);
+    float4 b = lerp(textureIn[ul], textureIn[ur], fracPos.x);
+
+    // Vertical interpolation
+    float4 y = lerp(a, b, fracPos.y);
+    return y;
+}
+
+// Advect quantity along flow lines
+float4 Advect(RWTexture2D<float4> textureIn, RWTexture2D<float4> state, int2 coord) {
+
+    // Follow velocity field backwards through time
+    // NOTE: SCALE FACTOR
+    float2 startPos = coord - timeStep * state[coord].xy;
+
+    // Sample at location
+    return BiLerp(textureIn, startPos);
+}
+
+[numthreads(8,8,1)]
+void CSMain (uint3 id : SV_DispatchThreadID)
+{
+    // Get the dimensions of the RenderTexture
+    uint width, height;
+    State.GetDimensions(width, height);
+
+    if (id.x == 0) {
+        State[id.xy] = float4(0.1, 0.1, 1.0, 1.0);
+        return;
+    }
+
+    // Advect density
+    State[id.xy] = Advect(State, State, id.xy);
+}
