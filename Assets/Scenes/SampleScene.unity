@@ -345,7 +345,7 @@ MonoBehaviour:
   noiseMultiplier: 3
   maxSteps: 1000
   fluidSize: 512
-  timeScale: 1
+  timeScale: 0.0001
   diskMult: 1
   starMult: 1
   numFrames: 1

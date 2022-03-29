@@ -350,6 +350,7 @@ public class RayTraceCamera : MonoBehaviour
         // Set the target and dispatch the compute shader
         fluidSimShader.SetTexture(0, "State", _fluidState);
         fluidSimShader.SetFloat("timeStep", timeStep);
+        fluidSimShader.SetFloat("time", Time.time);
         int threadGroupsX = Mathf.CeilToInt(fluidSize / 8.0f);
         int threadGroupsY = Mathf.CeilToInt(fluidSize / 8.0f);
         fluidSimShader.Dispatch(0, threadGroupsX, threadGroupsY, 1);

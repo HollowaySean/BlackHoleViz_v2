@@ -6,43 +6,32 @@ RWTexture2D<float4> State;
 
 // Input parameters
 float timeStep;
+float time;
 
-// Samplers
-SamplerState sampler_State;
+// Calculate all required state derivatives
+void CalculateSpatialDerivatives(int2 coord, float dl, out float4 dfdx, out float4 dfdy, out float4 dfdxy, out float4 dfdxx, out float4 dfdyy) {
 
-// Bilinear interpolation for textures
-float4 BiLerp(RWTexture2D<float4> textureIn, float2 samplePos) {
+    // Read state at stencil locations
+    float4 cState =  State[coord];
+    float4 uState =  State[coord + int2(0,   1)];
+    float4 dState =  State[coord + int2(0,  -1)];
+    float4 rState =  State[coord + int2(1,   0)];
+    float4 lState =  State[coord + int2(-1,  0)];
+    float4 urState = State[coord + int2(1,   1)];
+    float4 ulState = State[coord + int2(1,  -1)];
+    float4 drState = State[coord + int2(-1,  1)];
+    float4 dlState = State[coord + int2(-1, -1)];
 
-    // Get fractional and integral parts
-    float2 fracPos = frac(samplePos);
-    int2 intPos = (int)floor(samplePos);
+    // First order derivatives
+    dfdx = (rState - lState) / (2.0 * dl);
+    dfdy = (uState - dState) / (2.0 * dl);
 
-    // TODO: BOUNDARY CHECK
+    // Second order derivatives
+    dfdxx = (rState + lState - 2.0 * cState) / (dl * dl);
+    dfdyy = (uState + dState - 2.0 * cState) / (dl * dl);
 
-    // Get corner coords
-    int2 dl = intPos;
-    int2 ul = intPos + int2(0, 1);
-    int2 dr = intPos + int2(1, 0);
-    int2 ur = intPos + int2(1, 1);
-
-    // Horizontal interpolation
-    float4 a = lerp(textureIn[dl], textureIn[dr], fracPos.x);
-    float4 b = lerp(textureIn[ul], textureIn[ur], fracPos.x);
-
-    // Vertical interpolation
-    float4 y = lerp(a, b, fracPos.y);
-    return y;
-}
-
-// Advect quantity along flow lines
-float4 Advect(RWTexture2D<float4> textureIn, RWTexture2D<float4> state, int2 coord) {
-
-    // Follow velocity field backwards through time
-    // NOTE: SCALE FACTOR
-    float2 startPos = coord - timeStep * state[coord].xy;
-
-    // Sample at location
-    return BiLerp(textureIn, startPos);
+    // Mixed derivatives
+    dfdxy = (urState - drState + dlState - ulState) / (4.0 * dl * dl);
 }
 
 [numthreads(8,8,1)]
@@ -52,11 +41,27 @@ void CSMain (uint3 id : SV_DispatchThreadID)
     uint width, height;
     State.GetDimensions(width, height);
 
-    if (id.x == 0) {
-        State[id.xy] = float4(0.1, 0.1, 1.0, 1.0);
-        return;
-    }
+    // Calculate position
+    float2 fid = float2(id.xy);
+    float2 r = 2.0 * float2((fid.x / width) - 0.5, (fid.y / height) - 0.5);
 
-    // Advect density
-    State[id.xy] = Advect(State, State, id.xy);
+    // Calculate spatial derivatives
+    float4 state = State[id.xy];
+    float4 dfdx, dfdy, dfdxy, dfdxx, dfdyy;
+    CalculateSpatialDerivatives(id.xy, 1.0, dfdx, dfdy, dfdxy, dfdxx, dfdyy);
+
+    // Density update
+    float ps = length(r) > 0.1 ? 1.0 : 0.0;
+    float dpdt = -(dfdx.x * state.y + dfdy.x * state.z + state.x * (dfdx.y + dfdy.z)) + ps;
+
+    // Flow update
+    float2 g = length(r) > 0.1 ? 0.0001 / r : float2(0.0, 0.0);
+    float dudt = -(state.y * dfdx.y + state.z * dfdx.y) - g.x;
+    float dvdt = -(state.y * dfdy.y + state.z * dfdy.y) - g.y;
+
+    // Update state
+    state += timeStep * float4(dpdt, dudt, dvdt, 0.0);
+    if (state.x < 0.0) { state.x = 0.0; }
+    State[id.xy] = state;
+
 }
