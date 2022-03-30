@@ -10,6 +10,9 @@ public class RayTraceCamera : MonoBehaviour
     public ComputeShader rayUpdateShader;
     public ComputeShader simpleRayTracingShader;
     public ComputeShader fluidSimShader;
+    public ComputeShader fluidAccumulator;
+    public ComputeShader fluidSourceSetup;
+    public ComputeShader fluidRenderer;
 
     [Header("Textures")]
     public Cubemap skyboxTexture;
@@ -50,6 +53,10 @@ public class RayTraceCamera : MonoBehaviour
     [Header("Fluid Sim Parameters")]
     public int fluidSize = 512;
     public float timeScale = 1f;
+    public float lengthScale = 1f;
+    public float viscosity = 0f;
+    public float diffusivity = 0f;
+    public float conductivity = 0f;
 
     [Header("Brightness Modifiers")]
     public float diskMult = 1f;
@@ -87,6 +94,12 @@ public class RayTraceCamera : MonoBehaviour
     private RenderTexture _isComplete;
     private RenderTexture _simpleTarget;
     private RenderTexture _fluidState;
+    private RenderTexture _fluidSource;
+    private RenderTexture _fluidK1;
+    private RenderTexture _fluidK2;
+    private RenderTexture _fluidK3;
+    private RenderTexture _fluidK4;
+    private RenderTexture _fluidVisual;
 
     // Private variables
     private float
@@ -105,11 +118,12 @@ public class RayTraceCamera : MonoBehaviour
         hardCheck = false;
 
     private void Awake() {
-        _camera = GetComponent<Camera>();
-        BlackbodyTexture.wrapMode = TextureWrapMode.Clamp;
 
-        // Initialize fluid texture
-        SetupTexture(ref _fluidState, RenderTextureFormat.ARGBFloat, fluidSize, fluidSize);
+        // Get Camera component
+        _camera = GetComponent<Camera>();
+
+        // Set up textures for fluid simulation
+        InitFluidTextures();
     }
 
     private void InitRenderTextures() {
@@ -125,6 +139,25 @@ public class RayTraceCamera : MonoBehaviour
         SetupTexture(ref _simpleTarget, RenderTextureFormat.ARGBFloat, Screen.width, Screen.height);
     }
 
+    private void InitFluidTextures() {
+
+        // Initialize fluid texture
+        SetupTexture(ref _fluidState, RenderTextureFormat.ARGBFloat, fluidSize, fluidSize);
+        SetupTexture(ref _fluidSource, RenderTextureFormat.ARGBFloat, fluidSize, fluidSize);
+        SetupTexture(ref _fluidVisual, RenderTextureFormat.ARGBFloat, fluidSize, fluidSize);
+        SetupTexture(ref _fluidK1, RenderTextureFormat.ARGBFloat, fluidSize, fluidSize);
+        SetupTexture(ref _fluidK2, RenderTextureFormat.ARGBFloat, fluidSize, fluidSize);
+        SetupTexture(ref _fluidK3, RenderTextureFormat.ARGBFloat, fluidSize, fluidSize);
+        SetupTexture(ref _fluidK4, RenderTextureFormat.ARGBFloat, fluidSize, fluidSize);
+
+        // Initialize fluid sources and initial state
+        fluidSourceSetup.SetTexture(0, "Source", _fluidSource);
+        fluidSourceSetup.SetTexture(0, "State", _fluidState);
+        int threadGroupsX = Mathf.CeilToInt(fluidSize / 8.0f);
+        int threadGroupsY = Mathf.CeilToInt(fluidSize / 8.0f);
+        fluidSourceSetup.Dispatch(0, threadGroupsX, threadGroupsY, 1);
+    }
+
     private void SetupTexture(ref RenderTexture texture, RenderTextureFormat format, int width, int height) {
 
         if (texture == null || texture.width !=  width || texture.height != height) {
@@ -138,6 +171,9 @@ public class RayTraceCamera : MonoBehaviour
             texture.enableRandomWrite = true;
             texture.Create();
         }
+
+        // Set boundary method to clamp
+        texture.wrapMode = TextureWrapMode.Clamp;
     }
 
     private void SetShaderParameters() {
@@ -218,7 +254,7 @@ public class RayTraceCamera : MonoBehaviour
 
         switch(cameraState) {
             case CameraState.fluid:
-                Graphics.Blit(_fluidState, destination);
+                Graphics.Blit(_fluidVisual, destination);
                 break;
             case CameraState.relativistic:
                 Graphics.Blit(_color, destination);
@@ -248,7 +284,7 @@ public class RayTraceCamera : MonoBehaviour
                     SaveToFile(_color);
                     break;
                 case CameraState.fluid:
-                    SaveToFile(_fluidState);
+                    SaveToFile(_fluidVisual);
                     break;
                 case CameraState.simple:
                     SaveToFile(_simpleTarget);
@@ -256,20 +292,27 @@ public class RayTraceCamera : MonoBehaviour
             }
         }
 
+        // Restart render on spacebar
+        if (Input.GetKeyDown(KeyCode.Space)) {
+            switch(cameraState) {
+                case CameraState.fluid:
+                    InitFluidTextures();
+                    break;
+                default:
+                    ResetSettings();
+                    break;
+            }
+        }
+
         // Call for fluid update if running fluid simulator
         if (cameraState == CameraState.fluid) {
-            StepFluidSim(Time.deltaTime * timeScale);
+            StepFluidSim(timeScale);
             return;
         }
 
         // Skip if using simple renderer
         if (cameraState == CameraState.simple) {
             return;
-        }
-
-        // Restart render on spacebar
-        if (Input.GetKeyDown(KeyCode.Space)) {
-            ResetSettings();
         }
 
         // Step through ray trace if not complete
@@ -345,25 +388,69 @@ public class RayTraceCamera : MonoBehaviour
 
     private void StepFluidSim(float timeStep) {
 
-        // Make sure we have a current render target
-        InitSimpleRenderTexture();
-        // Set the target and dispatch the compute shader
-        fluidSimShader.SetTexture(0, "State", _fluidState);
-        fluidSimShader.SetFloat("timeStep", timeStep);
-        fluidSimShader.SetFloat("time", Time.time);
+        // Set parameters for fluid compute shader
         int threadGroupsX = Mathf.CeilToInt(fluidSize / 8.0f);
         int threadGroupsY = Mathf.CeilToInt(fluidSize / 8.0f);
+        fluidSimShader.SetTexture(0, "State", _fluidState);
+        fluidSimShader.SetTexture(0, "Source", _fluidSource);
+        fluidSimShader.SetFloat("timeStep", timeStep);
+        fluidSimShader.SetFloat("lengthScale", lengthScale);
+        fluidSimShader.SetFloat("mu_0", viscosity);
+        fluidSimShader.SetFloat("D_0", diffusivity);
+        fluidSimShader.SetFloat("lambda_0", conductivity);
+
+        // Step through Runge-Kutta 4th order integration steps
+
+        // RK4 Step 1
+        fluidSimShader.SetTexture(0, "diffIn", _fluidK1); // NOTE: UNUSED
+        fluidSimShader.SetTexture(0, "diffOut", _fluidK1);
+        fluidSimShader.SetInt("RK4Step", 1);
         fluidSimShader.Dispatch(0, threadGroupsX, threadGroupsY, 1);
+
+        // RK4 Step 2
+        fluidSimShader.SetTexture(0, "diffIn", _fluidK1);
+        fluidSimShader.SetTexture(0, "diffOut", _fluidK2);
+        fluidSimShader.SetInt("RK4Step", 2);
+        fluidSimShader.Dispatch(0, threadGroupsX, threadGroupsY, 1);
+
+        // RK4 Step 3
+        fluidSimShader.SetTexture(0, "diffIn", _fluidK2);
+        fluidSimShader.SetTexture(0, "diffOut", _fluidK3);
+        fluidSimShader.SetInt("RK4Step", 3);
+        fluidSimShader.Dispatch(0, threadGroupsX, threadGroupsY, 1);
+
+        // RK4 Step 4
+        fluidSimShader.SetTexture(0, "diffIn", _fluidK3);
+        fluidSimShader.SetTexture(0, "diffOut", _fluidK4);
+        fluidSimShader.SetInt("RK4Step", 4);
+        fluidSimShader.Dispatch(0, threadGroupsX, threadGroupsY, 1);
+
+        // Add RK4 accumulants
+        fluidAccumulator.SetTexture(0, "State", _fluidState);
+        fluidAccumulator.SetFloat("timeStep", timeStep);
+        fluidAccumulator.SetTexture(0, "k1", _fluidK1);
+        fluidAccumulator.SetTexture(0, "k2", _fluidK2);
+        fluidAccumulator.SetTexture(0, "k3", _fluidK3);
+        fluidAccumulator.SetTexture(0, "k4", _fluidK4);
+        fluidAccumulator.Dispatch(0, threadGroupsX, threadGroupsY, 1);
+
+        // Pass fluid state to viewer for rendering
+        fluidRenderer.SetTexture(0, "State", _fluidState);
+        fluidRenderer.SetTexture(0, "Output", _fluidVisual);
+        fluidRenderer.Dispatch(0, threadGroupsX, threadGroupsY, 1);
     }
 
     private void RenderSimple(RenderTexture destination) {
+
         // Make sure we have a current render target
         InitSimpleRenderTexture();
+
         // Set the target and dispatch the compute shader
         simpleRayTracingShader.SetTexture(0, "Result", _simpleTarget);
         int threadGroupsX = Mathf.CeilToInt(Screen.width / 8.0f);
         int threadGroupsY = Mathf.CeilToInt(Screen.height / 8.0f);
         simpleRayTracingShader.Dispatch(0, threadGroupsX, threadGroupsY, 1);
+
         // Blit the result texture to the screen
         Graphics.Blit(_simpleTarget, destination);
     }

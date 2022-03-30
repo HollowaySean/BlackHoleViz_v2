@@ -1,0 +1,36 @@
+// Each #kernel tells which function to compile; you can have many kernels
+#pragma kernel CSMain
+
+// Textures
+RWTexture2D<float4> State;
+RWTexture2D<float4> Source;
+
+[numthreads(8,8,1)]
+void CSMain (uint3 id : SV_DispatchThreadID)
+{
+    // Get the dimensions of the RenderTexture
+    uint width, height;
+    State.GetDimensions(width, height);
+
+    // Calculate position
+    float2 fid = float2(id.xy);
+    float2 r = 2.0 * float2((fid.x / width) - 0.5, (fid.y / height) - 0.5);
+
+    // Initialize variables
+    float4 state = float4(0.0, 0.0, 0.0, 0.0);
+    float4 source = float4(0.0, 0.0, 0.0, 0.0);
+
+	// Set up sources
+    if (length(r) < 0.1) {
+        source.x = 1.0;
+    }
+
+    // Set initial conditions
+    state.x = 0.1;
+    state.y = 10.0;
+    state.w = 300.0;
+
+    // Save textures
+    State[id.xy] = state;
+    Source[id.xy] = source;
+}

@@ -3,24 +3,73 @@
 
 // Output textures
 RWTexture2D<float4> State;
+RWTexture2D<float4> Source;
+RWTexture2D<float4> diffIn;
+RWTexture2D<float4> diffOut;
 
 // Input parameters
+int RK4Step;
 float timeStep;
-float time;
+float lengthScale;
+
+// Physical parameters
+float mu_0;
+float D_0;
+float lamdba_0;
+
+// Global parameters
+int width, height;
+
+// Adjust state for current RK4 step
+float4 AdjustedState(int2 coord) {
+
+    if (RK4Step == 1) {
+        return State[coord];
+    }
+    else if (RK4Step <= 3) {
+        return State[coord] + timeStep * 0.5 * diffIn[coord];
+    }
+    else {
+        return State[coord] + timeStep * diffIn[coord];
+    }
+
+}
 
 // Calculate all required state derivatives
 void CalculateSpatialDerivatives(int2 coord, float dl, out float4 dfdx, out float4 dfdy, out float4 dfdxy, out float4 dfdxx, out float4 dfdyy) {
 
     // Read state at stencil locations
-    float4 cState =  State[coord];
-    float4 uState =  State[coord + int2(0,   1)];
-    float4 dState =  State[coord + int2(0,  -1)];
-    float4 rState =  State[coord + int2(1,   0)];
-    float4 lState =  State[coord + int2(-1,  0)];
-    float4 urState = State[coord + int2(1,   1)];
-    float4 ulState = State[coord + int2(1,  -1)];
-    float4 drState = State[coord + int2(-1,  1)];
-    float4 dlState = State[coord + int2(-1, -1)];
+    float4 cState, uState, dState, rState, lState, urState, ulState, drState, dlState;
+    cState =  AdjustedState(coord);
+    uState =  AdjustedState(coord + int2(0,   1));
+    dState =  AdjustedState(coord + int2(0,  -1));
+    rState =  AdjustedState(coord + int2(1,   0));
+    lState =  AdjustedState(coord + int2(-1,  0));
+    urState = AdjustedState(coord + int2(1,   1));
+    ulState = AdjustedState(coord + int2(-1,  1));
+    drState = AdjustedState(coord + int2(1,  -1));
+    dlState = AdjustedState(coord + int2(-1, -1));
+
+    // Check boundary conditions
+    if (coord.x == 0) {
+        lState = cState;
+        ulState = cState;
+        dlState = cState;
+    }else if(coord.x == width-1) {
+        rState = cState;
+        urState = cState;
+        drState = cState;
+    }
+    if (coord.y == 0) {
+        dState = cState;
+        dlState = cState;
+        drState = cState;
+    }
+    else if (coord.y == height - 1) {
+        uState = cState;
+        urState = cState;
+        ulState = cState;
+    }
 
     // First order derivatives
     dfdx = (rState - lState) / (2.0 * dl);
@@ -34,11 +83,117 @@ void CalculateSpatialDerivatives(int2 coord, float dl, out float4 dfdx, out floa
     dfdxy = (urState - drState + dlState - ulState) / (4.0 * dl * dl);
 }
 
+void CalculateSpatialDerivatives2(int2 coord, float dl, out float4 dfdx, out float4 dfdy, out float4 dfdxy, out float4 dfdxx, out float4 dfdyy) {
+
+    // Read state at stencil locations
+    float4 cState, uState, dState, rState, lState, urState, ulState, drState, dlState;
+    float4 uuState, ddState, rrState, llState, uurrState, uullState, ddrrState, ddllState;
+    float4 uurState, urrState, uulState, ullState, ddrState, drrState, ddlState, dllState;
+    cState = AdjustedState(coord);
+    uState = AdjustedState(coord + int2(0, 1));
+    dState = AdjustedState(coord + int2(0, -1));
+    rState = AdjustedState(coord + int2(1, 0));
+    lState = AdjustedState(coord + int2(-1, 0));
+    urState = AdjustedState(coord + int2(1, 1));
+    ulState = AdjustedState(coord + int2(-1, 1));
+    drState = AdjustedState(coord + int2(1, -1));
+    dlState = AdjustedState(coord + int2(-1, -1));
+    uuState = AdjustedState(coord + int2(0, 2));
+    ddState = AdjustedState(coord + int2(0, -2));
+    rrState = AdjustedState(coord + int2(2, 0));
+    llState = AdjustedState(coord + int2(-2, 0));
+    uurState = AdjustedState(coord + int2(1, 2));
+    urrState = AdjustedState(coord + int2(2, 1));
+    uulState = AdjustedState(coord + int2(-1, 2));
+    ullState = AdjustedState(coord + int2(-2, 1));
+    ddrState = AdjustedState(coord + int2(1, -2));
+    drrState = AdjustedState(coord + int2(2, -1));
+    ddlState = AdjustedState(coord + int2(-1, -2));
+    dllState = AdjustedState(coord + int2(-2, -1));
+    uurrState = AdjustedState(coord + int2(2, 2));
+    uullState = AdjustedState(coord + int2(-2, 2));
+    ddrrState = AdjustedState(coord + int2(2, -2));
+    ddllState = AdjustedState(coord + int2(-2, -2));
+
+    // Check boundary conditions
+    if (coord.x == 0) {
+        lState = cState;
+        ulState = cState;
+        uulState = cState;
+        dlState = cState;
+        ddlState = cState;
+    }
+    else if (coord.x == width - 1) {
+        rState = cState;
+        urState = cState;
+        uurState = cState;
+        drState = cState;
+        ddrState = cState;
+    }
+    if (coord.x <= 1) {
+        llState = lState;
+        ullState = ulState;
+        uullState = ulState;
+        dllState = dlState;
+        ddllState = dlState;
+    }
+    else if (coord.x >= width - 2) {
+        rrState = rState;
+        urrState = urState;
+        uurrState = urState;
+        drrState = drState;
+        ddrrState = drState;
+    }
+    if (coord.y == 0) {
+        dState = cState;
+        dlState = cState;
+        dllState = cState;
+        drState = cState;
+        drrState = cState;
+    }
+    else if (coord.y == height - 1) {
+        uState = cState;
+        urState = cState;
+        urrState = cState;
+        ulState = cState;
+        ullState = cState;
+    }
+    if (coord.y <= 1) {
+        ddState = dState;
+        ddlState = dlState;
+        ddllState = dlState;
+        ddrState = drState;
+        ddrrState = drState;
+    }
+    else if (coord.y >= height - 2) {
+        uuState = uState;
+        uurState = urState;
+        uurrState = urState;
+        uulState = ulState;
+        uullState = ulState;
+    }
+
+    // First order derivatives
+    dfdx = (llState - 8.0 * lState + 8.0 * rState - rrState) / (12.0 * dl);
+    dfdy = (ddState - 8.0 * dState + 8.0 * uState - uuState) / (12.0 * dl);
+
+    // Second order derivatives
+    dfdxx = (-llState + 16.0 * lState - 30.0 * cState + 16.0 * rState - rrState) / (dl * dl);
+    dfdyy = (-ddState + 16.0 * dState - 30.0 * cState + 16.0 * uState - uuState) / (dl * dl);
+
+    // Mixed derivatives
+    //dfdxy = (urState - drState + dlState - ulState) / (4.0 * dl * dl);
+    dfdxy = (8.0 * (ddrState + drrState + ullState + uulState)
+        - 8.0 * (ddlState + dllState + uurState + urrState)
+        - 1.0 * (ddrrState + uullState - ddllState - uurrState)
+        + 64.0 * (dlState + urState - drState - ulState))
+        / (144.0 * dl * dl);
+}
+
 [numthreads(8,8,1)]
 void CSMain (uint3 id : SV_DispatchThreadID)
 {
     // Get the dimensions of the RenderTexture
-    uint width, height;
     State.GetDimensions(width, height);
 
     // Calculate position
@@ -46,22 +201,65 @@ void CSMain (uint3 id : SV_DispatchThreadID)
     float2 r = 2.0 * float2((fid.x / width) - 0.5, (fid.y / height) - 0.5);
 
     // Calculate spatial derivatives
-    float4 state = State[id.xy];
+    float4 state = AdjustedState(id.xy);
     float4 dfdx, dfdy, dfdxy, dfdxx, dfdyy;
-    CalculateSpatialDerivatives(id.xy, 1.0, dfdx, dfdy, dfdxy, dfdxx, dfdyy);
+    CalculateSpatialDerivatives(id.xy, lengthScale, dfdx, dfdy, dfdxy, dfdxx, dfdyy);
+
+    // Intermediate variables for easier typing
+    float p = state.x;
+    float u = state.y;
+    float v = state.z;
+    float T = state.w;
+    float px = dfdx.x;
+    float py = dfdy.x;
+    float ux = dfdx.y;
+    float uy = dfdy.y;
+    float vx = dfdx.z;
+    float vy = dfdy.z;
+    float Tx = dfdx.w;
+    float Ty = dfdy.w;
+    float uxx = dfdxx.y;
+    float uyy = dfdyy.y;
+    float uxy = dfdxy.y;
+    float vxx = dfdxx.z;
+    float vyy = dfdyy.z;
+    float vxy = dfdxy.z;
+    float pL = dfdxx.x + dfdyy.x;
+    float TL = dfdxx.w + dfdyy.w;
+
+    // Read sources
+    float4 source = Source[id.xy];
 
     // Density update
-    float ps = length(r) > 0.1 ? 1.0 : 0.0;
-    float dpdt = -(dfdx.x * state.y + dfdy.x * state.z + state.x * (dfdx.y + dfdy.z)) + ps;
+    float D = D_0 * sqrt(T / 300.0) * (1.0 / p); // TEMP
+    float dpdt  = -(px * u + py * v + p * ux + p * vy); // Advection
+    dpdt -= D * pL;                                     // Diffusion
+    dpdt -= D * ((px * Tx + py * Ty) / (2.0 * T));      // Diffusion
+    dpdt += D * ((px * px + py * py) / p);              // Diffusion
+    dpdt += source.x;                                   // Sources
 
     // Flow update
-    float2 g = length(r) > 0.1 ? 0.0001 / r : float2(0.0, 0.0);
-    float dudt = -(state.y * dfdx.y + state.z * dfdx.y) - g.x;
-    float dvdt = -(state.y * dfdy.y + state.z * dfdy.y) - g.y;
+    float R = 8.31;
+    float mu = mu_0 * sqrt(T / 300.0);
+    float2 g = float2(0.0, -1.0);
+
+    float dudt = -(u * ux + v * vx);                    // Advection
+    dudt -= R * (Tx + T * (px / p));                    // Pressure
+    dudt += (mu / 3.0) * (4.0 * uxx + uyy - vxy);       // Viscous stress
+    dudt += (mu / (6.0 * T)) * (Tx * (4.0 * ux - 2.0 * vy) + Ty * (uy + vx));
+    dudt += g.x;                                        // Gravity
+    dudt += source.y;                                   // Sources
+
+    float dvdt = -(u * uy + v * vy);                    // Advection
+    dvdt -= R * (Ty + T * (py / p));                    // Pressure
+    dvdt -= (mu / 3.0) * (4.0 * vyy + vxx - uxy);       // Viscous stress
+    dvdt += (mu / (6.0 * T)) * (Ty * (4.0 * vy - 2.0 * ux) + Tx * (uy + vx));
+    dvdt += g.y;                                        // Gravity
+    dvdt += source.z;                                   // Sources
+
+    // Temperature update
+    float dTdt = 0.0;
 
     // Update state
-    state += timeStep * float4(dpdt, dudt, dvdt, 0.0);
-    if (state.x < 0.0) { state.x = 0.0; }
-    State[id.xy] = state;
-
+    diffOut[id.xy] = float4(dpdt, dudt, dvdt, dTdt);
 }
