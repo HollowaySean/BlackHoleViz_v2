@@ -347,11 +347,11 @@ MonoBehaviour:
   noiseCutoff: 0.5
   noiseMultiplier: 3
   maxSteps: 1000
-  fluidSize: 512
+  fluidSize: 1024
   timeScale: 0.001
-  lengthScale: 1
-  viscosity: 0
-  diffusivity: 0
+  lengthScale: 10
+  viscosity: 0.00001
+  diffusivity: 0.00001
   conductivity: 0
   diskMult: 1
   starMult: 1

@@ -1,0 +1,44 @@
+// Each #kernel tells which function to compile; you can have many kernels
+#pragma kernel CSMain
+
+// Textures
+RWTexture2D<float4> StateIn;
+RWTexture2D<float4> StateOut;
+
+// Parameters
+float timeStep;
+float lengthScale;
+float newtonConstant = 1.0;
+float centralMass = 1.0;
+
+[numthreads(8,8,1)]
+void CSMain (uint3 id : SV_DispatchThreadID)
+{
+    // Read in texture
+    float4 state = StateIn[id.xy];
+
+    // Get the dimensions of the RenderTexture
+    uint width, height;
+    StateIn.GetDimensions(width, height);
+
+    // Calculate position
+    float2 fid = float2(id.xy);
+    float2 r = lengthScale * float2(fid.x - float(width) / 2.0, fid.y - float(height) / 2.0);
+
+    // Calculate force impulse
+    float rlen = length(r);
+    float2 impulse = float2(0.0, 0.0);
+    if (rlen > lengthScale) {
+
+        // Newton's law
+        impulse = -r * timeStep * newtonConstant * centralMass / (rlen * rlen * rlen);
+    }
+
+    // Add to velocity field
+    state.y += impulse.x;
+    state.z += impulse.y;
+
+    // Write back to texture
+    StateOut[id.xy] = state;
+
+}

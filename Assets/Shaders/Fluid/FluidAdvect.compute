@@ -1,0 +1,46 @@
+// Each #kernel tells which function to compile; you can have many kernels
+#pragma kernel CSMain
+
+// Textures
+RWTexture2D<float4> StateIn;
+RWTexture2D<float4> StateOut;
+
+// Parameters
+float timeStep;
+float lengthScale;
+
+// Bilinear interpolation
+float4 BiLerp(float2 coord) {
+
+	// Get integral parts
+	int2 icoord = floor(coord);
+	float2 fcoord = frac(coord);
+
+	// Read values at corners
+	float4 dl = StateIn[icoord + int2(0, 0)];
+	float4 dr = StateIn[icoord + int2(1, 0)];
+	float4 ul = StateIn[icoord + int2(0, 1)];
+	float4 ur = StateIn[icoord + int2(1, 1)];
+
+	// Horizontal interpolation
+	float4 u = lerp(ul, ur, fcoord.x);
+	float4 d = lerp(dl, dr, fcoord.x);
+
+	// Vertical interpolation
+	return lerp(d, u, fcoord.y);
+}
+
+[numthreads(8,8,1)]
+void CSMain (uint3 id : SV_DispatchThreadID)
+{
+	// Read from texture
+	float4 state = StateIn[id.xy];
+
+	// Determine advection displacement
+	float2 displacement = state.yz * timeStep / lengthScale;
+	float2 offsetCoord = float2(id.xy) - displacement;
+
+	// Interpolate state
+	float4 newState = BiLerp(offsetCoord);
+	StateOut[id.xy] = newState;
+}

@@ -7,6 +7,7 @@ RWTexture2D<float4> k1;
 RWTexture2D<float4> k2;
 RWTexture2D<float4> k3;
 RWTexture2D<float4> k4;
+RWTexture2D<float4> Statics;
 
 // Input variables
 float timeStep;
@@ -18,10 +19,22 @@ void CSMain (uint3 id : SV_DispatchThreadID)
 	// Accumulate RK4 textures
 	float4 stateOut = k1[id.xy] + 2.0 * k2[id.xy] + 2.0 * k3[id.xy] + k4[id.xy];
 	stateOut *= timeStep / 6.0;
+	//stateOut.x = clamp(stateOut.x, -1.0, 1.0);
 	stateOut += State[id.xy];
 	
 	// Clamp density
-	stateOut.x = max(stateOut.x, 0.0);
+	stateOut.x = clamp(stateOut.x, -10.0, 10.0);
+
+	// Clamp flow
+	//stateOut.y = clamp(stateOut.y, -500.0, 500.0);
+	//stateOut.z = clamp(stateOut.z, -500.0, 500.0);
+
+	// Account for static states
+	float4 staticSource = Statics[id.xy];
+	stateOut.x = staticSource.x != 0.0 ? staticSource.x : stateOut.x;
+	stateOut.y = staticSource.y != 0.0 ? staticSource.y : stateOut.y;
+	stateOut.z = staticSource.z != 0.0 ? staticSource.z : stateOut.z;
+	stateOut.w = staticSource.w != 0.0 ? staticSource.w : stateOut.w;
 
 	// Write back to state texture
 	State[id.xy] = stateOut;

@@ -13,7 +13,7 @@ float timeStep;
 float lengthScale;
 
 // Physical parameters
-float mu_0;
+float nu_0;
 float D_0;
 float lamdba_0;
 
@@ -182,7 +182,6 @@ void CalculateSpatialDerivatives2(int2 coord, float dl, out float4 dfdx, out flo
     dfdyy = (-ddState + 16.0 * dState - 30.0 * cState + 16.0 * uState - uuState) / (dl * dl);
 
     // Mixed derivatives
-    //dfdxy = (urState - drState + dlState - ulState) / (4.0 * dl * dl);
     dfdxy = (8.0 * (ddrState + drrState + ullState + uulState)
         - 8.0 * (ddlState + dllState + uurState + urrState)
         - 1.0 * (ddrrState + uullState - ddllState - uurrState)
@@ -203,7 +202,7 @@ void CSMain (uint3 id : SV_DispatchThreadID)
     // Calculate spatial derivatives
     float4 state = AdjustedState(id.xy);
     float4 dfdx, dfdy, dfdxy, dfdxx, dfdyy;
-    CalculateSpatialDerivatives(id.xy, lengthScale, dfdx, dfdy, dfdxy, dfdxx, dfdyy);
+    CalculateSpatialDerivatives2(id.xy, lengthScale, dfdx, dfdy, dfdxy, dfdxx, dfdyy);
 
     // Intermediate variables for easier typing
     float p = state.x;
@@ -224,36 +223,54 @@ void CSMain (uint3 id : SV_DispatchThreadID)
     float vxx = dfdxx.z;
     float vyy = dfdyy.z;
     float vxy = dfdxy.z;
-    float pL = dfdxx.x + dfdyy.x;
+    float pxx = dfdxx.x;
+    float pyy = dfdyy.x;
     float TL = dfdxx.w + dfdyy.w;
 
     // Read sources
     float4 source = Source[id.xy];
 
     // Density update
-    float D = D_0 * sqrt(T / 300.0) * (1.0 / p); // TEMP
-    float dpdt  = -(px * u + py * v + p * ux + p * vy); // Advection
-    dpdt -= D * pL;                                     // Diffusion
-    dpdt -= D * ((px * Tx + py * Ty) / (2.0 * T));      // Diffusion
-    dpdt += D * ((px * px + py * py) / p);              // Diffusion
-    dpdt += source.x;                                   // Sources
+    float D = D_0;
+    //D *= sqrt(T / 300.0) * (1.0 / p);                       // Temperature and pressure dependence
+
+    //float dpdt  = -(px * u + py * v + p * ux + p * vy);     // Advection
+    float dpdt = -(px * u + py * v + ux + vy);     // Advection
+    if (D > 0.0) {
+        dpdt += D * (pxx + px * px + pyy + py * py);                                     // Diffusion
+        //dpdt += D * ((px * Tx + py * Ty) / (2.0 * T));      // Diffusion
+        //dpdt -= D * ((px * px + py * py) / p);              // Diffusion
+    }
+    dpdt += source.x;                                       // Sources
 
     // Flow update
     float R = 8.31;
-    float mu = mu_0 * sqrt(T / 300.0);
-    float2 g = float2(0.0, -1.0);
+    float nu = nu_0;
+    //nu *= sqrt(T / 300.0);                                  // Temperature dependence
+    float2 g = length(r) < 0.1 ? float2(0.0, 0.0) : -1.0 * r / (length(r) * length(r) * length(r));
+    //float2 g = float2(0.0, 0.0);
 
-    float dudt = -(u * ux + v * vx);                    // Advection
-    dudt -= R * (Tx + T * (px / p));                    // Pressure
-    dudt += (mu / 3.0) * (4.0 * uxx + uyy - vxy);       // Viscous stress
-    dudt += (mu / (6.0 * T)) * (Tx * (4.0 * ux - 2.0 * vy) + Ty * (uy + vx));
+    // Horizontal flow
+    double dudt = 0.0;
+    dudt -= (u * ux + v * vx);                            // Advection
+    dudt -= R * (Tx + px * T);                    // Pressure
+    if (nu > 0.0) {
+        dudt += (nu / 3.0) * (4.0 * uxx + 3.0 * uyy - vxy);                         // Viscous stress
+        dudt += (nu / 3.0) * (px * (4.0 * ux - 2.0 * vy) + py * (uy + vx));         // Viscous stress due to density gradient
+        //dudt += (nu / (6.0 * T)) * (Tx * (4.0 * ux - 2.0 * vy) + Ty * (uy + vx));   // Viscous stress due to temperature gradient
+    }
     dudt += g.x;                                        // Gravity
     dudt += source.y;                                   // Sources
 
-    float dvdt = -(u * uy + v * vy);                    // Advection
-    dvdt -= R * (Ty + T * (py / p));                    // Pressure
-    dvdt -= (mu / 3.0) * (4.0 * vyy + vxx - uxy);       // Viscous stress
-    dvdt += (mu / (6.0 * T)) * (Ty * (4.0 * vy - 2.0 * ux) + Tx * (uy + vx));
+    // Vertical flow
+    double dvdt = 0.0;
+    dvdt -= (u * uy + v * vy);                            // Advection
+    dvdt -= R * (Ty + py * T);                    // Pressure
+    if (nu > 0.0) {
+        dvdt += (nu / 3.0) * (4.0 * vyy + 3.0 * vxx - uxy);                     // Viscous stress
+        dvdt += (nu / 3.0) * (py * (4.0 * ux - 2.0 * vy) + px * (uy + vx));     // Viscous stress due to density gradient
+        //dvdt += (nu / (6.0 * T)) * (Ty * (4.0 * vy - 2.0 * ux) + Tx * (uy + vx));   // Viscous stress due to temperature gradient
+    }
     dvdt += g.y;                                        // Gravity
     dvdt += source.z;                                   // Sources
 

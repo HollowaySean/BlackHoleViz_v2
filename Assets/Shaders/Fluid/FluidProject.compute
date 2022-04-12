@@ -1,0 +1,18 @@
+// Each #kernel tells which function to compile; you can have many kernels
+#pragma kernel CSMain
+
+// Textures
+RWTexture2D<float4> StateIn;
+RWTexture2D<float4> Div;
+
+// Parameters
+float timeStep;
+float lengthScale;
+
+[numthreads(8,8,1)]
+void CSMain (uint3 id : SV_DispatchThreadID)
+{
+
+
+
+}

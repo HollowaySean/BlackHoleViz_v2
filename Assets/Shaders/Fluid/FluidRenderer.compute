@@ -1,0 +1,19 @@
+// Each #kernel tells which function to compile; you can have many kernels
+#pragma kernel CSMain
+
+// Textures
+RWTexture2D<float4> StateIn;
+RWTexture2D<float4> StateOut;
+RWTexture2D<float4> Output;
+
+[numthreads(8,8,1)]
+void CSMain (uint3 id : SV_DispatchThreadID)
+{
+	// Render density
+	float4 state = StateIn[id.xy];
+	float density = state.x;
+	Output[id.xy] = float4(density.xxx, 1.0);
+
+	// Write back to other texture
+	StateOut[id.xy] = state;
+}

@@ -4,6 +4,13 @@
 // Textures
 RWTexture2D<float4> State;
 RWTexture2D<float4> Source;
+RWTexture2D<float4> Statics;
+
+float random(in float2 uv)
+{
+    float2 noise = (frac(sin(dot(uv, float2(12.9898, 78.233) * 2.0)) * 43758.5453));
+    return abs(noise.x + noise.y) * 0.5;
+}
 
 [numthreads(8,8,1)]
 void CSMain (uint3 id : SV_DispatchThreadID)
@@ -19,18 +26,31 @@ void CSMain (uint3 id : SV_DispatchThreadID)
     // Initialize variables
     float4 state = float4(0.0, 0.0, 0.0, 0.0);
     float4 source = float4(0.0, 0.0, 0.0, 0.0);
-
-	// Set up sources
-    if (length(r) < 0.1) {
-        source.x = 1.0;
-    }
+    float4 staticSource = float4(0.0, 0.0, 0.0, 0.0);
 
     // Set initial conditions
+    //state.x = log(max(0.1 + 0.5*random(r), 0.01));
     state.x = 0.1;
-    state.y = 10.0;
+    state.y = 0.1;
+    state.z = 0.0;
     state.w = 300.0;
+
+	// Set up sources
+    if (length(r) < 0.5) {
+        source.x = 1.0;
+        state.x = 1.0;
+    }
+
+    // Set up statics
+   /* if (r.x < 0.0) {
+        staticSource.y = 0.0;
+    }*/
+    /*if (id.x <= 2 || id.y <= 2 || id.x >= width-3 || id.y >= height-3) {
+        staticSource.x = log(0.1);
+    }*/
 
     // Save textures
     State[id.xy] = state;
     Source[id.xy] = source;
+    Statics[id.xy] = staticSource;
 }
