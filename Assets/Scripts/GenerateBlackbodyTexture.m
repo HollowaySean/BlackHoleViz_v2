@@ -6,20 +6,21 @@ close all;
 % Parameters
 l_step = 1;
 lambda = 380:l_step:780;
+tex_size = 256;
 
 % Set temperature range
 % T_step = 100;
 % T = 1000:T_step:10000;
-T = linspace(1000, 10000, 128);
+T = linspace(1000, 20000, tex_size);
 
 % Set redshift range
 shift_step = 0.01;
-beta = sqrt(1/6);
+beta = sqrt(1/8);
 max_dop = sqrt((1 + beta) / (1 - beta));
-max_grav = sqrt(3/2);
+max_grav = sqrt(17/9);
 max_shift = max_dop * max_grav;
 % shift = (1/max_shift):shift_step:max_shift;
-shift = linspace(0.5, 2, 128);
+shift = linspace(0.25, 4, tex_size);
 
 % Set up output structure
 rgb_out = zeros(length(T), length(shift), 3);
@@ -43,6 +44,8 @@ for n = 1:length(T)
         rgb_out(n,m,:) = rgb;
     end
 end
+
+rgb_out_raw = rgb_out;
 
 % Convert to single precision
 rgb_out = rgb_out / max(rgb_out, [], 'all');
@@ -94,8 +97,8 @@ end
 function v = planck(lambda, T)
 
     % Constants
-    c = physconst('LightSpeed');
-    k = physconst('Boltzmann');
+    c = 299792458;
+    k = 1.3806504e-23;
     h = 6.62607015e-34;
 
     % Planck's curve at wavelength lambda in nm for temperature T Kelvin

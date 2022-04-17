@@ -214,8 +214,7 @@ Transform:
   m_LocalRotation: {x: 0, y: 0, z: 0, w: 1}
   m_LocalPosition: {x: 0, y: 0, z: 0}
   m_LocalScale: {x: 1, y: 1, z: 1}
-  m_Children:
-  - {fileID: 1551754295}
+  m_Children: []
   m_Father: {fileID: 0}
   m_RootOrder: 1
   m_LocalEulerAnglesHint: {x: 0, y: 0, z: 0}
@@ -297,13 +296,14 @@ Transform:
   m_PrefabInstance: {fileID: 0}
   m_PrefabAsset: {fileID: 0}
   m_GameObject: {fileID: 963194225}
-  m_LocalRotation: {x: 0.09229593, y: 0.7010574, z: -0.09229593, w: 0.7010574}
+  m_LocalRotation: {x: 0.18301265, y: 0.6830127, z: 0, w: 0.7071068}
   m_LocalPosition: {x: -4, y: 1, z: 0}
   m_LocalScale: {x: 1, y: 1, z: 1}
-  m_Children: []
+  m_Children:
+  - {fileID: 1551754295}
   m_Father: {fileID: 0}
   m_RootOrder: 0
-  m_LocalEulerAnglesHint: {x: 15, y: 90, z: 0}
+  m_LocalEulerAnglesHint: {x: 15, y: 90, z: 15}
 --- !u!114 &963194229
 MonoBehaviour:
   m_ObjectHideFlags: 0
@@ -330,22 +330,25 @@ MonoBehaviour:
   fluidSource: {fileID: 7200000, guid: a3d8452e8d115364ab04c5f43747402e, type: 3}
   fluidRenderer: {fileID: 7200000, guid: 6e3e75a3468acf1449a78310306643a7, type: 3}
   skyboxTexture: {fileID: 8900000, guid: e8e1bea99525f9a4da79fb1967fb3e11, type: 2}
-  BlackbodyTexture: {fileID: 2800000, guid: ae5b631bad0bca34ca3ad7df7fa85c3f, type: 3}
+  BlackbodyTexture: {fileID: 2800000, guid: b0bdf5951dc5c8d4190cd6b9b4884586, type: 3}
   timeStep: 0.01
   poleMargin: 0.01
   poleStep: 0.0001
   escapeDistance: 10000
   horizonRadius: 0.5
-  spinFactor: 0
-  diskMax: 3.2
-  diskTemp: 4000
-  falloffRate: 4.5
+  spinFactor: -1
+  diskMax: 4
+  diskTemp: 6000
+  innerFalloffRate: 4.5
+  outerFalloffRate: 1
   beamExponent: 1.5
   rotationSpeed: 1
   timeDelayFactor: 0
+  viscousDisk: 0
+  relativeTemp: 0
   noiseOffset: {x: 0, y: 0, z: 0}
   noiseScale: 1.5
-  noiseCirculation: 0
+  noiseCirculation: 1
   noiseH: 0.5
   noiseOctaves: 10
   stepSize: 0.01
@@ -353,6 +356,8 @@ MonoBehaviour:
   noiseCutoff: 0.5
   noiseMultiplier: 3
   maxSteps: 1000
+  diskMult: 1
+  starMult: 1
   fluidSize: 512
   timeScale: 1
   lengthScale: 1
@@ -362,24 +367,22 @@ MonoBehaviour:
   diffusivity: 0
   conductivity: 0
   newtonConstant: 1
-  diskMult: 1
-  starMult: 1
   numFrames: 1
   framesPerSecond: 25
   updateInterval: 30
-  overSample: 8
-  maxSoftPasses: 10000
+  overSample: 1
+  maxSoftPasses: 5000
   maxPasses: 10000
   saveToFile: 0
   timeStampFile: 0
-  frameStampFile: 0
-  filenamePrefix: NoBending
-  subfolder: Presentation
-  exitOnComplete: 1
+  frameStampFile: 1
+  filenamePrefix: spin1
+  subfolder: SpinVideo1
+  exitOnComplete: 0
   saveType: 0
-  cameraState: 1
+  cameraState: 0
   motionPivot: {fileID: 1551754295}
-  sweptAngle: 0
+  sweptAngle: 90
 --- !u!45 &963194230
 Skybox:
   m_ObjectHideFlags: 0
@@ -416,6 +419,6 @@ Transform:
   m_LocalPosition: {x: 0, y: 0, z: 0}
   m_LocalScale: {x: 1, y: 1, z: 1}
   m_Children: []
-  m_Father: {fileID: 528781395}
+  m_Father: {fileID: 963194228}
   m_RootOrder: 0
   m_LocalEulerAnglesHint: {x: 0, y: 0, z: 0}

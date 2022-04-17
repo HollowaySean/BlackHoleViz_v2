@@ -37,10 +37,13 @@ public class RayTraceCamera : MonoBehaviour
     public float diskMax = 4f;
     [Range(1E3F, 1E4F)]
     public float diskTemp = 1E4F;
-    public float falloffRate = 10f;
+    public float innerFalloffRate = 4.5f;
+    public float outerFalloffRate = 2.0f;
     public float beamExponent = 2f;
     public float rotationSpeed = 1f;
     public float timeDelayFactor = 0.1f;
+    public bool viscousDisk = false;
+    public bool relativeTemp = false;
 
     [Header("Noise Parameters")]
     public Vector3 noiseOffset = new Vector3(0f, 0f, 0f);
@@ -56,6 +59,10 @@ public class RayTraceCamera : MonoBehaviour
     public float noiseMultiplier = 1f;
     public int maxSteps = 20;
 
+    [Header("Brightness Modifiers")]
+    public float diskMult = 1f;
+    public float starMult = 1f;
+
     [Header("Fluid Sim Parameters")]
     public int fluidSize = 512;
     public float timeScale = 1f;
@@ -66,10 +73,6 @@ public class RayTraceCamera : MonoBehaviour
     public float diffusivity = 0f;
     public float conductivity = 0f;
     public float newtonConstant = 1f;
-
-    [Header("Brightness Modifiers")]
-    public float diskMult = 1f;
-    public float starMult = 1f;
 
     [Header("Renderer Settings")]
     public int numFrames = 60;
@@ -225,7 +228,8 @@ public class RayTraceCamera : MonoBehaviour
         rayUpdateShader.SetFloat("spinFactor", spinFactor);
         rayUpdateShader.SetFloat("diskMax", diskMax);
         rayUpdateShader.SetFloat("diskTemp", diskTemp);
-        rayUpdateShader.SetFloat("falloffRate", falloffRate);
+        rayUpdateShader.SetFloat("innerFalloffRate", innerFalloffRate);
+        rayUpdateShader.SetFloat("outerFalloffRate", outerFalloffRate);
         rayUpdateShader.SetFloat("beamExponent", beamExponent);
         rayUpdateShader.SetFloat("diskMult", diskMult);
         rayUpdateShader.SetFloat("starMult", starMult);
@@ -233,6 +237,8 @@ public class RayTraceCamera : MonoBehaviour
         rayUpdateShader.SetFloat("time", coordinateTime);
         rayUpdateShader.SetFloat("rotationSpeed", rotationSpeed);
         rayUpdateShader.SetFloat("timeDelayFactor", timeDelayFactor);
+        rayUpdateShader.SetBool("viscousDisk", viscousDisk);
+        rayUpdateShader.SetBool("relativeTemp", relativeTemp);
     }
 
     private void SetSimpleShaderParameters() {
@@ -253,7 +259,7 @@ public class RayTraceCamera : MonoBehaviour
         simpleRayTracingShader.SetFloat("horizonRadius", horizonRadius);
         simpleRayTracingShader.SetFloat("diskMax", diskMax);
         simpleRayTracingShader.SetFloat("diskTemp", diskTemp);
-        simpleRayTracingShader.SetFloat("falloffRate", falloffRate);
+        simpleRayTracingShader.SetFloat("falloffRate", innerFalloffRate);
         simpleRayTracingShader.SetFloat("beamExponent", beamExponent);
         simpleRayTracingShader.SetFloat("diskMult", diskMult);
         simpleRayTracingShader.SetFloat("starMult", starMult);
@@ -315,6 +321,11 @@ public class RayTraceCamera : MonoBehaviour
                     ResetSettings();
                     break;
             }
+        }
+
+        // Next frame on N key
+        if(Input.GetKeyDown(KeyCode.N) && cameraState == CameraState.relativistic) {
+            OnComplete();
         }
 
         // Call for fluid update if running fluid simulator

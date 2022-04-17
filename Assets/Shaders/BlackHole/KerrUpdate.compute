@@ -40,11 +40,14 @@ float horizonRadius;
 float spinFactor;
 float diskMax;
 float diskTemp;
-float falloffRate;
+float innerFalloffRate;
+float outerFalloffRate;
 float beamExponent;
 float time;
 float rotationSpeed;
 float timeDelayFactor;
+bool viscousDisk;
+bool relativeTemp;
 
 // Brightness parameters
 float diskMult;
@@ -334,7 +337,7 @@ float VolumetricDiskBrightness(float3 x, float3 xLast, float risco, float t)
     }
 
     // Reduce intensity over distance
-    float falloff = rNorm < 0.0 ? exp(falloffRate * rNorm * diskMax / horizonRadius) : 1.0;
+    float falloff = rNorm < 0.0 ? exp(innerFalloffRate * rNorm * diskMax / risco) : 1.0;
     volumetricValue *= falloff;
 
     return volumetricValue;
@@ -361,11 +364,23 @@ float4 GetDiskColor(float3 x, float3 xLast, float t)
     float texColor = VolumetricDiskBrightness(x, xLast, risco, t);
 
     // Reduce intensity over distance
-    float falloff = uv.y < 0.0 ? exp(falloffRate * uv.y * diskMax / risco) : max((1.0 - uv.y), 0.0);
+    float falloff = uv.y < 0.0 ? exp(innerFalloffRate * uv.y * diskMax / risco) : pow(abs(1.0 - uv.y), outerFalloffRate);
     texColor *= falloff;
 
     // Calculate temperature
-    float rFactor = pow(abs(3.0 * horizonRadius / rEval), 0.75);
+    float k = 17.65138460219478737997;
+    float rFactor;
+    if (viscousDisk) {
+        rFactor = min(1.0, k * pow(abs(risco / rEval), 0.75) * max(0.0, 1 - pow(abs(risco / rEval), 0.125)));
+    }
+    else {
+        if (relativeTemp) {
+            rFactor = pow(abs(3.0 * horizonRadius / rEval), 0.75);
+        }
+        else {
+            rFactor = pow(abs(risco / rEval), 0.75);
+        }
+    }
     float T = diskTemp * rFactor;
 
     // Calculate doppler shift
@@ -384,7 +399,7 @@ float4 GetDiskColor(float3 x, float3 xLast, float t)
 
     // Sample blackbody texture
     uv.x = clamp((shift - 0.25) / (4.0 - 0.25), 0.0, 1.0);
-    uv.y = (T - 1000.0) / (10000.0 - 1000.0);
+    uv.y = clamp((T - 1000.0) / (20000.0 - 1000.0), 0.0, 1.0);
     float3 bbColor = _BlackbodyTexture.SampleLevel(sampler_BlackbodyTexture, uv, 0);
 
     // Weight by noise strength and multiplier
