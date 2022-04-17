@@ -14,8 +14,10 @@ public class RayTraceCamera : MonoBehaviour
     public ComputeShader fluidDiffuse;
     public ComputeShader fluidForce;
     public ComputeShader fluidDivergence;
+    public ComputeShader fluidPressureSolver;
     public ComputeShader fluidProject;
     public ComputeShader fluidBoundary;
+    public ComputeShader fluidSource;
     public ComputeShader fluidRenderer;
 
     [Header("Textures")]
@@ -58,10 +60,12 @@ public class RayTraceCamera : MonoBehaviour
     public int fluidSize = 512;
     public float timeScale = 1f;
     public float lengthScale = 1f;
-    public int jacobiIterations = 25;
+    public int diffusionIterations = 25;
+    public int pressureIterations = 25;
     public float viscosity = 0f;
     public float diffusivity = 0f;
     public float conductivity = 0f;
+    public float newtonConstant = 1f;
 
     [Header("Brightness Modifiers")]
     public float diskMult = 1f;
@@ -98,11 +102,13 @@ public class RayTraceCamera : MonoBehaviour
     private RenderTexture _color;
     private RenderTexture _isComplete;
     private RenderTexture _simpleTarget;
-    private RenderTexture _fluidState1;
-    private RenderTexture _fluidState2;
+    private RenderTexture _fluidState;
+    private RenderTexture _fluidStateTemp;
     private RenderTexture _fluidSource;
     private RenderTexture _fluidStaticSource;
     private RenderTexture _fluidVisual;
+    private RenderTexture _fluidPressure;
+    private RenderTexture _fluidDivergence;
 
     // Private variables
     private float
@@ -145,16 +151,21 @@ public class RayTraceCamera : MonoBehaviour
     private void InitFluidTextures() {
 
         // Initialize fluid texture
-        SetupTexture(ref _fluidState1, RenderTextureFormat.ARGBFloat, fluidSize, fluidSize);
-        SetupTexture(ref _fluidState2, RenderTextureFormat.ARGBFloat, fluidSize, fluidSize);
+        SetupTexture(ref _fluidState, RenderTextureFormat.ARGBFloat, fluidSize, fluidSize);
+        SetupTexture(ref _fluidStateTemp, RenderTextureFormat.ARGBFloat, fluidSize, fluidSize);
         SetupTexture(ref _fluidSource, RenderTextureFormat.ARGBFloat, fluidSize, fluidSize);
         SetupTexture(ref _fluidVisual, RenderTextureFormat.ARGBFloat, fluidSize, fluidSize);
         SetupTexture(ref _fluidStaticSource, RenderTextureFormat.ARGBFloat, fluidSize, fluidSize);
+        SetupTexture(ref _fluidDivergence, RenderTextureFormat.RFloat, fluidSize, fluidSize);
+        SetupTexture(ref _fluidPressure, RenderTextureFormat.RFloat, fluidSize, fluidSize);
 
         // Initialize fluid sources and initial state
         fluidSourceSetup.SetTexture(0, "Source", _fluidSource);
-        fluidSourceSetup.SetTexture(0, "State", _fluidState1);
+        fluidSourceSetup.SetTexture(0, "State", _fluidState);
         fluidSourceSetup.SetTexture(0, "Statics", _fluidStaticSource);
+        fluidSourceSetup.SetFloat("lengthScale", lengthScale);
+        fluidSourceSetup.SetFloat("newtonConstant", newtonConstant);
+        fluidSourceSetup.SetFloat("centralMass", 1f);
         int threadGroupsX = Mathf.CeilToInt(fluidSize / 8.0f);
         int threadGroupsY = Mathf.CeilToInt(fluidSize / 8.0f);
         fluidSourceSetup.Dispatch(0, threadGroupsX, threadGroupsY, 1);
@@ -395,60 +406,66 @@ public class RayTraceCamera : MonoBehaviour
         int threadGroupsY = Mathf.CeilToInt(fluidSize / 8.0f);
 
         // Advection step
-        fluidAdvect.SetTexture(0, "StateIn", _fluidState1);
-        fluidAdvect.SetTexture(0, "StateOut", _fluidState2);
+        fluidAdvect.SetTexture(0, "StateIn", _fluidState);
+        fluidAdvect.SetTexture(0, "StateOut", _fluidStateTemp);
         fluidAdvect.SetFloat("timeStep", timeStep);
         fluidAdvect.SetFloat("lengthScale", lengthScale);
         fluidAdvect.Dispatch(0, threadGroupsX, threadGroupsY, 1);
 
         // Diffusion step
-        fluidDiffuse.SetTexture(0, "State", _fluidState2);
+        fluidDiffuse.SetTexture(0, "State", _fluidStateTemp);
         fluidDiffuse.SetFloat("timeStep", timeStep);
         fluidDiffuse.SetFloat("lengthScale", lengthScale);
         fluidDiffuse.SetFloat("nu_0", viscosity);
         fluidDiffuse.SetFloat("D_0", diffusivity);
         fluidDiffuse.SetFloat("lambda_0", conductivity);
-
-        // Jacobi iteration
-        for (int i = 0; i < jacobiIterations; i++) {
+        for (int i = 0; i < diffusionIterations; i++) {
             fluidDiffuse.Dispatch(0, threadGroupsX, threadGroupsY, 1);
         }
 
         // Force application 
-        fluidForce.SetTexture(0, "StateIn", _fluidState2);
-        fluidForce.SetTexture(0, "StateOut", _fluidState1);
+        fluidForce.SetTexture(0, "StateIn", _fluidStateTemp);
+        fluidForce.SetTexture(0, "StateOut", _fluidState);
         fluidForce.SetFloat("timeStep", timeStep);
         fluidForce.SetFloat("lengthScale", lengthScale);
+        fluidForce.SetFloat("newtonConstant", newtonConstant);
+        fluidForce.SetFloat("centralMass", 1f);
         fluidForce.Dispatch(0, threadGroupsX, threadGroupsY, 1);
 
-        // Hodge projection
-        fluidDivergence.SetTexture(0, "StateIn", _fluidState1);
-        fluidDivergence.SetTexture(0, "DivOut", _fluidState2);
-        fluidDivergence.SetFloat("timeStep", timeStep);
+        // Calculate divergence
+        fluidDivergence.SetTexture(0, "StateIn", _fluidState);
+        fluidDivergence.SetTexture(0, "DivOut", _fluidDivergence);
         fluidDivergence.SetFloat("lengthScale", lengthScale);
-        //fluidDivergence.Dispatch(0, threadGroupsX, threadGroupsY, 1);
+        fluidDivergence.Dispatch(0, threadGroupsX, threadGroupsY, 1);
 
-        // Jacobi iteration
-        fluidProject.SetTexture(0, "StateIn", _fluidState1);
-        fluidProject.SetTexture(0, "Div", _fluidState2);
-        fluidProject.SetFloat("timeStep", timeStep);
-        fluidProject.SetFloat("lengthScale", lengthScale);
-        for (int i = 0; i < jacobiIterations; i++) {
-            //fluidProject.Dispatch(0, threadGroupsX, threadGroupsY, 1);
+        // Pressure calculation with Jacobi iteration
+        fluidPressureSolver.SetTexture(0, "Pressure", _fluidPressure);
+        fluidPressureSolver.SetTexture(0, "Divergence", _fluidDivergence);
+        for (int i = 0; i < pressureIterations; i++) {
+            fluidPressureSolver.Dispatch(0, threadGroupsX, threadGroupsY, 1);
         }
 
-        // Boundary and sources
-        fluidBoundary.SetTexture(0, "StateIn", _fluidState1);
-        fluidBoundary.SetTexture(0, "StateOut", _fluidState2);
-        fluidBoundary.SetTexture(0, "Source", _fluidSource);
-        fluidBoundary.SetTexture(0, "StaticSource", _fluidStaticSource);
-        fluidBoundary.SetFloat("timeStep", timeStep);
-        fluidBoundary.SetFloat("lengthScale", lengthScale);
-        //fluidBoundary.Dispatch(0, threadGroupsX, threadGroupsY, 1);
+        // Helmholtz-Hodge projection
+        fluidProject.SetTexture(0, "State", _fluidState);
+        fluidProject.SetTexture(0, "Pressure", _fluidPressure);
+        fluidProject.SetFloat("lengthScale", lengthScale);
+        fluidProject.Dispatch(0, threadGroupsX, threadGroupsY, 1);
+
+        // Boundary conditions
+        fluidBoundary.SetTexture(0, "State", _fluidState);
+        fluidBoundary.SetTexture(0, "Pressure", _fluidPressure);
+        fluidBoundary.Dispatch(0, threadGroupsX, threadGroupsY, 1);
+
+        // Add sources
+        fluidSource.SetTexture(0, "State", _fluidState);
+        fluidSource.SetTexture(0, "Source", _fluidSource);
+        fluidSource.SetTexture(0, "Statics", _fluidStaticSource);
+        fluidSource.SetFloat("timeStep", timeStep);
+        fluidSource.SetFloat("lengthScale", lengthScale);
+        fluidSource.Dispatch(0, threadGroupsX, threadGroupsY, 1);
 
         // Pass fluid state to viewer for rendering
-        fluidRenderer.SetTexture(0, "StateIn", _fluidState1);
-        fluidRenderer.SetTexture(0, "StateOut", _fluidState2);
+        fluidRenderer.SetTexture(0, "State", _fluidState);
         fluidRenderer.SetTexture(0, "Output", _fluidVisual);
         fluidRenderer.Dispatch(0, threadGroupsX, threadGroupsY, 1);
     }

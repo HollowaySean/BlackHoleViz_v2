@@ -8,8 +8,8 @@ RWTexture2D<float4> StateOut;
 // Parameters
 float timeStep;
 float lengthScale;
-float newtonConstant = 1.0;
-float centralMass = 1.0;
+float newtonConstant;
+float centralMass;
 
 [numthreads(8,8,1)]
 void CSMain (uint3 id : SV_DispatchThreadID)
@@ -23,15 +23,17 @@ void CSMain (uint3 id : SV_DispatchThreadID)
 
     // Calculate position
     float2 fid = float2(id.xy);
-    float2 r = lengthScale * float2(fid.x - float(width) / 2.0, fid.y - float(height) / 2.0);
+    float2 r = lengthScale * float2(fid.x - (float(width) / 2.0), fid.y - (float(height) / 2.0));
 
     // Calculate force impulse
     float rlen = length(r);
     float2 impulse = float2(0.0, 0.0);
-    if (rlen > lengthScale) {
+    float horizon = 1.0 * lengthScale;
+    if (rlen > horizon) {
 
         // Newton's law
-        impulse = -r * timeStep * newtonConstant * centralMass / (rlen * rlen * rlen);
+        //impulse = -normalize(r) * timeStep * newtonConstant * centralMass / ((rlen - horizon) * (rlen - horizon));
+        impulse = -normalize(r) * timeStep * newtonConstant * centralMass / (rlen * rlen);
     }
 
     // Add to velocity field
@@ -40,5 +42,4 @@ void CSMain (uint3 id : SV_DispatchThreadID)
 
     // Write back to texture
     StateOut[id.xy] = state;
-
 }

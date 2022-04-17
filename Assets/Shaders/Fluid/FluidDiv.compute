@@ -3,10 +3,9 @@
 
 // Textures
 RWTexture2D<float4> StateIn;
-RWTexture2D<float4> DivOut;
+RWTexture2D<float> DivOut;
 
 // Parameters
-float timeStep;
 float lengthScale;
 
 [numthreads(8,8,1)]
@@ -22,6 +21,6 @@ void CSMain (uint3 id : SV_DispatchThreadID)
 	float div = ((xR.y - xL.y) + (xU.z - xD.z)) / lengthScale;
 
 	// Write back to texture
-	DivOut[id.xy] = float4(div, 0.0, 0.0, 0.0);
+	DivOut[id.xy] = div;
 
 }
