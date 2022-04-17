@@ -297,13 +297,13 @@ Transform:
   m_PrefabInstance: {fileID: 0}
   m_PrefabAsset: {fileID: 0}
   m_GameObject: {fileID: 963194225}
-  m_LocalRotation: {x: 0.15304592, y: 0.6903455, z: -0.030843511, w: 0.7064338}
+  m_LocalRotation: {x: 0.09229593, y: 0.7010574, z: -0.09229593, w: 0.7010574}
   m_LocalPosition: {x: -4, y: 1, z: 0}
   m_LocalScale: {x: 1, y: 1, z: 1}
   m_Children: []
   m_Father: {fileID: 0}
   m_RootOrder: 0
-  m_LocalEulerAnglesHint: {x: 15, y: 90, z: 10}
+  m_LocalEulerAnglesHint: {x: 15, y: 90, z: 0}
 --- !u!114 &963194229
 MonoBehaviour:
   m_ObjectHideFlags: 0
@@ -336,10 +336,10 @@ MonoBehaviour:
   poleStep: 0.0001
   escapeDistance: 10000
   horizonRadius: 0.5
-  spinFactor: -1
+  spinFactor: 0
   diskMax: 3.2
   diskTemp: 4000
-  falloffRate: 1.5
+  falloffRate: 4.5
   beamExponent: 1.5
   rotationSpeed: 1
   timeDelayFactor: 0
@@ -367,19 +367,19 @@ MonoBehaviour:
   numFrames: 1
   framesPerSecond: 25
   updateInterval: 30
-  overSample: 2
+  overSample: 8
   maxSoftPasses: 10000
   maxPasses: 10000
   saveToFile: 0
-  timeStampFile: 1
+  timeStampFile: 0
   frameStampFile: 0
-  filenamePrefix: KerrTest
-  subfolder: 
-  exitOnComplete: 0
+  filenamePrefix: NoBending
+  subfolder: Presentation
+  exitOnComplete: 1
   saveType: 0
-  cameraState: 0
+  cameraState: 1
   motionPivot: {fileID: 1551754295}
-  sweptAngle: 30
+  sweptAngle: 0
 --- !u!45 &963194230
 Skybox:
   m_ObjectHideFlags: 0

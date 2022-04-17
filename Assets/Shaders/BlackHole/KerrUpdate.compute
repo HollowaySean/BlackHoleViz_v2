@@ -361,15 +361,15 @@ float4 GetDiskColor(float3 x, float3 xLast, float t)
     float texColor = VolumetricDiskBrightness(x, xLast, risco, t);
 
     // Reduce intensity over distance
-    float falloff = uv.y < 0.0 ? exp(falloffRate * uv.y * diskMax / horizonRadius) : max((1.0 - uv.y), 0.0);
+    float falloff = uv.y < 0.0 ? exp(falloffRate * uv.y * diskMax / risco) : max((1.0 - uv.y), 0.0);
     texColor *= falloff;
 
     // Calculate temperature
-    float rFactor = pow(abs(risco / rEval), 0.75);
+    float rFactor = pow(abs(3.0 * horizonRadius / rEval), 0.75);
     float T = diskTemp * rFactor;
 
     // Calculate doppler shift
-    float v = sqrt(horizonRadius / (2.0 * max(rEval, risco)));
+    float v = sqrt(horizonRadius / (2.0 * rEval));
     float gamma = 1.0 / sqrt(1.0 - (v * v));
     float3 xDiff = xLast - x;
     float incidence = xDiff.z * rEval / length(xDiff * float3(1.0, rEval, rEval));
