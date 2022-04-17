@@ -286,19 +286,19 @@ bool DiskCheck(float3 x, float3 xLast)
 
     // Check if within accretion disk bounds
     float r_ave = (x.x + xLast.x) / 2.0;
-    if (r_ave < 1.5 * horizonRadius || r_ave > diskMax) { return false; }
+    if (r_ave < horizonRadius || r_ave > diskMax) { return false; }
 
     // If passed, return true
     return true;
 }
 
 // Volumetric rendering of circumstellar disk
-float VolumetricDiskBrightness(float3 x, float3 xLast, float t)
+float VolumetricDiskBrightness(float3 x, float3 xLast, float risco, float t)
 {
     // Calculate position along disk
     float r = (x.x + xLast.x) / 2.0;
     float phi = (x.z + xLast.z) / 2.0;
-    float rNorm = (r - 3.0 * horizonRadius) / (diskMax - 3.0 * horizonRadius);
+    float rNorm = (r - risco) / (diskMax - risco);
 
     // Calculate starting position
     float3 startPos;
@@ -343,26 +343,33 @@ float VolumetricDiskBrightness(float3 x, float3 xLast, float t)
 // Get color of accretion disk
 float4 GetDiskColor(float3 x, float3 xLast, float t)
 {
+    // Calculate innermost stable circular orbit
+    float spp = pow(abs(1.0 + spinFactor), 1.0 / 3.0);
+    float spm = pow(abs(1.0 - spinFactor), 1.0 / 3.0);
+    float z1 = 1 + spp * spm * (spp + spm);
+    float z2 = sqrt(3.0 * spinFactor * spinFactor + z1 * z1);
+    float risco = 0.5 * horizonRadius * (3.0 + z2 + sign(spinFactor) * sqrt((3.0 - z1) * (3.0 + z1 + 2.0 * z2)));
+
     // Calculate noise texture UV coordinates
     float2 uv;
     float rEval = (x.x + xLast.x) / 2.0;
     float phEval = (x.z + xLast.z) / 2.0;
     uv.x = phEval / (2.0 * PI);
-    uv.y = (abs(rEval) - 3.0 * horizonRadius) / (diskMax - 3.0 * horizonRadius);
+    uv.y = (abs(rEval) - risco) / (diskMax - risco);
 
     // Sample noise texture
-    float texColor = VolumetricDiskBrightness(x, xLast, t);
+    float texColor = VolumetricDiskBrightness(x, xLast, risco, t);
 
     // Reduce intensity over distance
     float falloff = uv.y < 0.0 ? exp(falloffRate * uv.y * diskMax / horizonRadius) : max((1.0 - uv.y), 0.0);
     texColor *= falloff;
 
     // Calculate temperature
-    float rFactor = pow(abs(3.0 * horizonRadius / rEval), 0.75);
+    float rFactor = pow(abs(risco / rEval), 0.75);
     float T = diskTemp * rFactor;
 
     // Calculate doppler shift
-    float v = sqrt(horizonRadius / (2.0 * rEval));
+    float v = sqrt(horizonRadius / (2.0 * max(rEval, risco)));
     float gamma = 1.0 / sqrt(1.0 - (v * v));
     float3 xDiff = xLast - x;
     float incidence = xDiff.z * rEval / length(xDiff * float3(1.0, rEval, rEval));
@@ -372,10 +379,11 @@ float4 GetDiskColor(float3 x, float3 xLast, float t)
     texColor *= pow(abs(shift), beamExponent);
 
     // Calculate gravitational redshift
-    shift *= sqrt(1 - (horizonRadius / rEval));
+    float a = spinFactor * horizonRadius / 2.0;
+    shift *= sqrt(1 - (horizonRadius * rEval / (rEval * rEval + a * a)));
 
     // Sample blackbody texture
-    uv.x = (shift - 0.5) / (2.0 - 0.5);
+    uv.x = clamp((shift - 0.25) / (4.0 - 0.25), 0.0, 1.0);
     uv.y = (T - 1000.0) / (10000.0 - 1000.0);
     float3 bbColor = _BlackbodyTexture.SampleLevel(sampler_BlackbodyTexture, uv, 0);
 
