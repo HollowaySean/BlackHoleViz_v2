@@ -72,5 +72,8 @@ crashlytics-build.properties
 /[Aa]ssets/[Ss]treamingAssets/aa/*
 
 # User added
-/[Aa]ssets/[Tt]extures/*
+/[Aa]ssets/[Tt]extures/[Tt]emp/*
+/[Aa]ssets/[Tt]extures/*.meta
+/[Aa]ssets/[Tt]extures/*.cubemap
+/[Aa]ssets/[Tt]extures/*.png
 /[Aa]ssets/[Oo]utput/*
