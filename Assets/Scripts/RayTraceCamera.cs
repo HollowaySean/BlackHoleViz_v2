@@ -6,71 +6,130 @@ using UnityEngine;
 public class RayTraceCamera : MonoBehaviour
 {
     [Header("Shaders")]
+    // Shader that generates the initial camera rays
     public ComputeShader cameraVectorShader;
+    // Shader that steps the rays along their geodesics
     public ComputeShader rayUpdateShader;
+    // Simple one-step ray tracer shader, for comparison
     public ComputeShader simpleRayTracingShader;
 
     [Header("Textures")]
+    // Background skybox in Cubemap format
     public Cubemap skyboxTexture;
+    // Texture used as a 2D lookup table ontaining blackbody color, normalized by color brightness
+    // Inputs to lookup table are temperature and redshift factor
     public Texture BlackbodyTexture;
 
     [Header("Step Size Parameters")]
+    // Minimum timestep for normal ray march
     public float timeStep = 0.001f;
+    // Angle in radians from the poles, within which the timestep is reduced
     public float poleMargin = 0.01f;
+    // Reduced timestep to use within the pole regions
     public float poleStep = 0.0001f;
+    // Distance at which the ray is considered to have escaped to infinity
     public float escapeDistance = 10000f;
 
     [Header("Physical Parameters")]
+    // Radius of the event horizon, in Unity's coordinate system
+    // This could be revised, since ultimately it shifts the coordinate system to 
+    //      fit this value to the Schwarzchild radius
     public float horizonRadius = 0.5f;
+    // Normalized spin, from -1 to 1. 
+    // Negative is prograde, positive is retrograde.
     [Range(-1f, 1f)]
     public float spinFactor = 0.0f;
+    // Maximum distance to render the accretion disk
+    // In units of Schwarzchild radius
     public float diskMax = 4f;
+    // Temperature of the accretion disk, in Kelvin
     [Range(1E3F, 1E4F)]
     public float diskTemp = 1E4F;
+    // Exponential factor for fall-off of disk intensity within r_ISCO
+    // Not physically correct
     public float innerFalloffRate = 4.5f;
+    // Power-law exponent for fall-off of disk intensity outside r_ISCO
+    // Not physically correct
     public float outerFalloffRate = 2.0f;
+    // Power-exponent for relativistic beaming
     public float beamExponent = 2f;
+    // Rotation speed of accretion disk, in rad/s
     public float rotationSpeed = 1f;
+    // Fudge factor for rotation speed
+    // I don't remember the logic behind this one
     public float timeDelayFactor = 0.1f;
+    // Use viscous disk model T/F
     public bool viscousDisk = false;
+    // Sets whether 'diskTemp' is at r_ISCO or at max temperature
+    // Should be fairly similar in non-spinning, non-viscous case
     public bool relativeTemp = false;
 
     [Header("Noise Parameters")]
+    // Offset for RNG
     public Vector3 noiseOffset = new Vector3(0f, 0f, 0f);
+    // Scale for RNG
     public float noiseScale = 1f;
+    // Amount of azimuthal shift per radial distance
+    // Not physically correct, but makes it look like the disk is spinning
     public float noiseCirculation = Mathf.PI / 2f;
+    // H-factor for Fractional Brownian Motion algorithm
     public float noiseH = 1f;
+    // Number of octaves for Fractional Brownian Motion algorithm
     public int noiseOctaves = 4;
 
     [Header("Volumetric Cloud Parameters")]
+    // Step size for volumetric disk rendering
     public float stepSize = 0.01f;
+    // Beer-Lambert law absorbance factor
     public float absorptionFactor = 0.5f;
+    // Value below which noise value is set to 0
     public float noiseCutoff = 0.5f;
+    // Scaling factor for volumetric noise
     public float noiseMultiplier = 1f;
+    // Max ray marching steps for volumetric renderer
     public int maxSteps = 20;
 
     [Header("Brightness Modifiers")]
+    // Multiplier for brightness of accretion disk
     public float diskMult = 1f;
+    // Multiplier for brightness of background
     public float starMult = 1f;
 
     [Header("Renderer Settings")]
+    // Number of images to render
     public int numFrames = 60;
+    // Frames per one second of time step
+    // Units are likely confused/confusing for this
     public float framesPerSecond = 30f;
+    // How often to check render textures for completion
     public float updateInterval = 15f;
+    // Oversampling factor for output resolution
     public int overSample = 4;
+    // Number of ray march steps after which the check for trapped rays is done
     public int maxSoftPasses = 5000;
+    // Maximum number of ray march steps
     public int maxPasses = 10000;
+    // Save image to file T/F
     public bool saveToFile = false;
+    // Add timestamp to file name T/F
     public bool timeStampFile = false;
+    // Add frame # to file name T/F
     public bool frameStampFile = true;
+    // Prefix for file name
     public string filenamePrefix = "";
+    // Subfolder to save files to
     public string subfolder = "";
+    // Close the program on render complete T/F
     public bool exitOnComplete = false;
+    // File type to save to
     public SaveType saveType = SaveType.JPEG;
+    // Which camera renderer to use for image
     public CameraState cameraState = CameraState.relativistic;
 
     [Header("Camera Motion Settings")]
+    // Unity transform object for the camera to pivot around
     public Transform motionPivot;
+    // Angle for the camera to turn throughout rendered frames
     public float sweptAngle;
 
     public enum SaveType { JPEG, PNG };
